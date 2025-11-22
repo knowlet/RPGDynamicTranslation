@@ -1,0 +1,15 @@
+{
+  "name": "rpg-dynamic-translation",
+  "version": "1.0.0",
+  "description": "Dynamic translation system for RPG Maker MV/MZ",
+  "main": "DynamicTranslation.js",
+  "scripts": {
+    "test": "jest"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "jest": "^29.7.0"
+  }
+}
