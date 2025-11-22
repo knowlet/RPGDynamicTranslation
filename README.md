@@ -1,140 +1,118 @@
-# 動態翻譯系統使用指南
+# RPG Maker 動態翻譯系統 (Dynamic Translation System)
 
-## 概述
+這是一個專為 RPG Maker MV/MZ 設計的動態翻譯插件，支援載入外部 JSON 翻譯檔案，並在遊戲中即時切換語言。
 
-此翻譯系統支援動態載入 mtool 工具生成的 key-value 格式翻譯檔案，可以在遊戲運行時即時切換語言並更新所有介面文字。
+## ✨ 功能特色
 
-## 檔案結構
+*   **動態載入**：無需重新啟動遊戲即可載入新的翻譯檔案。
+*   **即時切換**：玩家可以在選項選單中隨時切換語言。
+*   **格式支援**：支援 mtool 工具生成的 key-value JSON 格式。
+*   **自動偵測**：自動偵測並載入 `translations/` 資料夾下的語言檔案。
+*   **簡易安裝**：提供自動化安裝腳本，一鍵配置。
 
+---
+
+## 📖 使用者指南 (User Guide)
+
+如果您是遊戲開發者或翻譯者，想要將此系統整合到您的遊戲中，請參考以下步驟。
+
+### 🚀 快速安裝
+
+我們提供了一個 Python 腳本來自動化安裝過程。此腳本會將插件複製到您的專案中，並自動設定 `plugins.js`。
+
+1.  確保您已安裝 Python 3。
+2.  下載此專案。
+3.  在終端機 (Terminal) 或命令提示字元 (CMD) 中執行以下指令：
+
+```bash
+# 格式: python3 install_plugin.py [您的 RPG Maker 專案根目錄]
+python3 install_plugin.py ../MyRPGProject
 ```
-www/
-├── js/
-│   └── plugins/
-│       └── DynamicTranslation.js    # 主要翻譯插件
-├── translations/                    # 翻譯檔案目錄
-│   ├── zh.json                     # 中文翻譯
-│   ├── en.json                     # 英文翻譯
-│   └── ja.json                     # 日文翻譯
-└── test_translation_system.js      # 測試腳本
-```
 
-## 翻譯檔案格式
+腳本會自動執行以下動作：
+*   複製 `DynamicTranslation.js` 到 `js/plugins/`。
+*   更新 `js/plugins.js` 以啟用插件。
+*   自動搜尋專案根目錄下的 JSON 翻譯檔（如 `A翻譯.json`），並將其安裝為預設中文翻譯 (`translations/zh.json`)。
 
-翻譯檔案使用 JSON 格式，支援 mtool 工具的 key-value 格式：
+### 📦 手動安裝
+
+如果您無法使用腳本，也可以手動安裝：
+
+1.  將 `DynamicTranslation.js` 複製到您專案的 `js/plugins/` 資料夾。
+2.  開啟 RPG Maker 編輯器，進入「插件管理器 (Plugin Manager)」。
+3.  新增 `DynamicTranslation` 插件並開啟狀態為 ON。
+4.  在專案根目錄建立 `translations/` 資料夾。
+
+### 📝 準備翻譯檔案
+
+翻譯檔案使用 JSON 格式，放置於 `translations/` 資料夾中。檔名即為語言代碼（例如 `zh.json`, `en.json`, `ja.json`）。
+
+**格式範例 (`translations/zh.json`)：**
 
 ```json
 {
-  "原文文字1": "譯文文字1",
-  "原文文字2": "譯文文字2",
-  "等級": "Level",
-  "HP": "HP",
-  "攻擊": "Attack",
-  "要儲存這個檔案嗎？": "Save this file?",
-  "%1 出現了！": "%1 appeared!"
+  "Level": "等級",
+  "HP": "生命值",
+  "Attack": "攻擊力",
+  "Save which file?": "要儲存哪個檔案？",
+  "%1 found!": "發現了 %1！"
 }
 ```
 
-## 使用方法
+### 🎮 遊戲內使用
 
-### 1. 安裝插件
+#### 1. 選項選單
+插件會自動在「選項 (Options)」選單中加入「Language / 語言」選項，玩家可以直接在此切換。
 
-將 `DynamicTranslation.js` 加入遊戲的插件列表中，並啟用它。
+#### 2. 事件指令
+您也可以透過事件指令來控制語言：
 
-### 2. 準備翻譯檔案
+*   **插件命令 (Plugin Command)**:
+    *   `SetLanguage en` (切換為英文)
+    *   `SetLanguage zh` (切換為中文)
 
-使用 mtool 工具生成翻譯檔案，並將其放在 `translations/` 目錄中。支援的語言代碼：
-- `zh`: 中文
-- `en`: 英文
-- `ja`: 日文
-- `ko`: 韓文
-- `fr`: 法文
-- `de`: 德文
-- `es`: 西班牙文
-- `pt`: 葡萄牙文
-- `ru`: 俄文
+*   **腳本呼叫 (Script Call)**:
+    ```javascript
+    TranslationManager.setLanguage('en');
+    ```
 
-### 3. 在遊戲中使用
+---
 
-#### 方法一：選項選單
-系統會自動在選項選單中加入語言選擇項目。玩家可以：
-1. 開啟遊戲選單
-2. 選擇「選項」
-3. 找到「Language / 語言」選項
-4. 按確認鍵切換語言
+## 🛠️ 開發者指南 (Developer Guide)
 
-#### 方法二：腳本呼叫
-在事件中使用腳本呼叫：
+如果您想協助改進此插件或進行二次開發，請參考以下說明。
 
-```javascript
-TranslationManager.setLanguage('en');     // 切換到英文
-TranslationManager.setLanguage('ja');     // 切換到日文
-TranslationManager.setLanguage('zh');     // 切換到中文
+### 環境建置
+
+本專案使用 Node.js 進行測試與開發管理。
+
+1.  安裝 Node.js (建議 v18+)。
+2.  安裝相依套件：
+
+```bash
+npm install
 ```
 
-#### 方法三：插件命令
-在事件中使用插件命令：
+### 執行測試
 
-```
-SetLanguage en    // 切換到英文
-SetLanguage ja    // 切換到日文
-SetLanguage zh    // 切換到中文
-```
+我們使用 Jest 進行單元測試，並模擬了 RPG Maker 的執行環境。
 
-## API 參考
-
-### TranslationManager 物件
-
-```javascript
-// 取得當前語言
-TranslationManager.getCurrentLanguage()
-
-// 取得可用語言列表
-TranslationManager.getAvailableLanguages()
-
-// 切換語言
-TranslationManager.setLanguage(languageCode)
-
-// 翻譯特定文字
-TranslationManager.translate(originalText)
+**使用 npm:**
+```bash
+npm test
 ```
 
-### 插件參數
+### 專案結構
 
-在插件管理器中設定：
+*   `DynamicTranslation.js`: 插件核心程式碼 (IIFE 格式)。
+*   `install_plugin.py`: 自動安裝腳本 (Python)。
+*   `tests/`: 測試檔案目錄。
+    *   `setup.js`: 模擬 RPG Maker 全域變數與瀏覽器環境。
+    *   `DynamicTranslation.test.js`: 主要測試邏輯。
+*   `.github/workflows/`: CI/CD 自動化測試配置。
 
-- **Default Language**: 預設語言代碼 (預設: zh)
-- **Translation Path**: 翻譯檔案路徑 (預設: translations/)
-- **Auto Detect Translations**: 是否自動偵測翻譯檔案 (預設: true)
+### 貢獻方式
 
-## 工作原理
-
-1. **初始化階段**: 系統載入 `$dataSystem.terms` 建立原文對映表
-2. **載入階段**: 根據設定載入對應語言的翻譯檔案
-3. **覆蓋階段**: 覆蓋 `TextManager` 的方法，讓所有文字查詢都經過翻譯處理
-4. **切換階段**: 當語言切換時，重新整理所有視窗以更新顯示文字
-
-## 測試
-
-包含 `test_translation_system.js` 測試腳本，可以用來驗證翻譯系統功能。
-
-在瀏覽器控制台中執行：
-```javascript
-testTranslationSystem();
-```
-
-## 支援的文字類型
-
-系統支援翻譯以下類型的文字：
-- 基本屬性名稱 (等級、HP、MP等)
-- 指令文字 (戰鬥、物品、技能等)
-- 系統訊息 (儲存確認、載入確認等)
-- 戰鬥訊息 (傷害、恢復、獲得物品等)
-- 介面文字 (選項、按鈕等)
-
-## 注意事項
-
-1. 翻譯檔案必須使用 UTF-8 編碼
-2. 系統會自動處理含參數的文字 (如 `%1 出現了！`)
-3. 未找到翻譯的文字會顯示原文
-4. 建議先建立完整的中英文翻譯，再擴展到其他語言
-5. 翻譯檔案載入失敗不會影響遊戲正常運行
+歡迎提交 Pull Request 或 Issue。在提交程式碼前，請確保：
+1.  所有測試皆通過 (`npm test`)。
+2.  如有新增功能，請補上相應的測試案例。
