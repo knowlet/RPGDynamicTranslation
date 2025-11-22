@@ -81,7 +81,7 @@
  * ============================================================================
  */
 
-(function() {
+(function () {
     'use strict';
 
     // 插件參數
@@ -89,19 +89,21 @@
     var defaultLanguage = parameters['Default Language'] || 'zh';
     var translationPath = parameters['Translation Path'] || 'translations/';
     var autoDetectTranslations = parameters['Auto Detect Translations'] === 'true';
+    var translationMode = parameters['Translation Mode'] || 'simple'; // simple, full
 
     // TranslationManager 類別 - 支援 mtool 工具的 key-value 格式
-    var TranslationManager = function() {
+    var TranslationManager = function () {
         this._currentLanguage = defaultLanguage;
         this._translations = {}; // key-value 格式的翻譯字典
         this._originalTexts = {}; // 記錄原文的映射
         this._isInitialized = false;
         this._refreshCallbacks = [];
         this._availableLanguages = [];
+        this._enableSubstringExtraction = translationMode === 'full';
     };
 
     // 初始化翻譯管理器
-    TranslationManager.prototype.initialize = function() {
+    TranslationManager.prototype.initialize = function () {
         if (this._isInitialized) return;
 
         this._buildOriginalTextMapping();
@@ -109,7 +111,7 @@
             this._detectAvailableLanguages();
         } else {
             this._availableLanguages = [defaultLanguage];
-            this.loadLanguage(defaultLanguage, function() {
+            this.loadLanguage(defaultLanguage, function () {
                 this._isInitialized = true;
                 this._applyTranslations();
             }.bind(this));
@@ -117,7 +119,7 @@
     };
 
     // 建立原文對映（從 TextManager 和系統資料建立）
-    TranslationManager.prototype._buildOriginalTextMapping = function() {
+    TranslationManager.prototype._buildOriginalTextMapping = function () {
         this._originalTexts = {};
 
         // 從 $dataSystem.terms 建立原文對映
@@ -144,12 +146,12 @@
     };
 
     // 自動偵測可用的語言檔案
-    TranslationManager.prototype._detectAvailableLanguages = function() {
+    TranslationManager.prototype._detectAvailableLanguages = function () {
         var testFiles = ['zh', 'en', 'ja', 'ko', 'fr', 'de', 'es', 'pt', 'ru'];
         var loadedCount = 0;
 
-        testFiles.forEach(function(lang) {
-            this.loadLanguage(lang, function(success) {
+        testFiles.forEach(function (lang) {
+            this.loadLanguage(lang, function (success) {
                 loadedCount++;
                 if (success && this._availableLanguages.indexOf(lang) === -1) {
                     this._availableLanguages.push(lang);
@@ -169,13 +171,13 @@
     };
 
     // 載入指定語言的翻譯檔案
-    TranslationManager.prototype.loadLanguage = function(language, callback) {
+    TranslationManager.prototype.loadLanguage = function (language, callback) {
         var filename = translationPath + language + '.json';
         var xhr = new XMLHttpRequest();
 
         xhr.open('GET', filename);
         xhr.overrideMimeType('application/json');
-        xhr.onload = function() {
+        xhr.onload = function () {
             if (xhr.status < 400) {
                 try {
                     var translations = JSON.parse(xhr.responseText);
@@ -193,7 +195,7 @@
             }
         }.bind(this);
 
-        xhr.onerror = function() {
+        xhr.onerror = function () {
             console.warn('無法載入翻譯檔案:', filename);
             if (callback) callback(false);
         };
@@ -202,11 +204,11 @@
     };
 
     // 設定當前語言
-    TranslationManager.prototype.setLanguage = function(language) {
+    TranslationManager.prototype.setLanguage = function (language) {
         if (this._currentLanguage === language) return;
 
         if (!this._translations[language]) {
-            this.loadLanguage(language, function(success) {
+            this.loadLanguage(language, function (success) {
                 if (success) {
                     this._currentLanguage = language;
                     this._applyTranslations();
@@ -221,17 +223,101 @@
     };
 
     // 取得當前語言
-    TranslationManager.prototype.getCurrentLanguage = function() {
+    TranslationManager.prototype.getCurrentLanguage = function () {
         return this._currentLanguage;
     };
 
     // 取得可用語言列表
-    TranslationManager.prototype.getAvailableLanguages = function() {
+    TranslationManager.prototype.getAvailableLanguages = function () {
         return this._availableLanguages.slice();
     };
 
+    // 提取對應的翻譯部分
+    TranslationManager.prototype._extractCorrespondingTranslation = function (originalPart, fullKey, fullTranslation, keyIndex) {
+        // 專門處理 RPG Maker 中的訊息分割情況
+
+        // 分割原文和翻譯為行
+        var originalLines = fullKey.split('\n');
+        var translationLines = fullTranslation.split('\n');
+
+        // 如果行數相同，嘗試按行匹配
+        if (originalLines.length === translationLines.length && originalLines.length > 1) {
+            // 計算子字串在哪一行
+            var currentPos = 0;
+            for (var i = 0; i < originalLines.length; i++) {
+                var lineStart = currentPos;
+                var lineEnd = currentPos + originalLines[i].length + (i < originalLines.length - 1 ? 1 : 0); // +1 for \n
+
+                if (keyIndex >= lineStart && keyIndex < lineEnd) {
+                    // 子字串在這一行中
+                    var relativeIndex = keyIndex - lineStart;
+                    var relativeLength = Math.min(originalPart.length, originalLines[i].length - relativeIndex);
+
+                    // 在對應的翻譯行中提取
+                    var translatedLine = translationLines[i];
+                    if (translatedLine) {
+                        // 使用比例映射起始和結束位置
+                        var lineRatio = translatedLine.length / originalLines[i].length;
+
+                        var transStart = Math.floor(relativeIndex * lineRatio);
+                        var transEnd;
+
+                        // 如果原文子字串延伸到行尾，則譯文也延伸到行尾
+                        if (relativeIndex + relativeLength >= originalLines[i].length) {
+                            transEnd = translatedLine.length;
+                        } else {
+                            transEnd = Math.floor((relativeIndex + relativeLength) * lineRatio);
+                        }
+
+                        return translatedLine.substring(transStart, transEnd);
+                    }
+                }
+
+                currentPos = lineEnd;
+            }
+        }
+
+        // 方法2: 如果長度比例接近，使用比例提取
+        if (Math.abs(fullTranslation.length - fullKey.length) / fullKey.length < 0.5) {
+            var startRatio = keyIndex / fullKey.length;
+            var endRatio = (keyIndex + originalPart.length) / fullKey.length;
+
+            var translationStart = Math.round(startRatio * fullTranslation.length);
+            var translationEnd = Math.round(endRatio * fullTranslation.length);
+
+            translationStart = Math.max(0, Math.min(translationStart, fullTranslation.length));
+            translationEnd = Math.max(translationStart, Math.min(translationEnd, fullTranslation.length));
+
+            var result = fullTranslation.substring(translationStart, translationEnd);
+
+            // 如果結果包含換行但原文不包含，清理換行
+            if (originalPart.indexOf('\n') === -1 && result.indexOf('\n') !== -1) {
+                // 只保留第一行
+                result = result.split('\n')[0];
+            }
+
+            return result;
+        }
+
+        // 方法3: 簡單的長度比例估計（最後的後備方案）
+        var estimatedLength = Math.round(originalPart.length * (fullTranslation.length / fullKey.length));
+        var estimatedStart = Math.round(keyIndex * (fullTranslation.length / fullKey.length));
+
+        estimatedStart = Math.max(0, Math.min(estimatedStart, fullTranslation.length));
+        estimatedLength = Math.max(1, Math.min(estimatedLength, fullTranslation.length - estimatedStart));
+
+        var result = fullTranslation.substring(estimatedStart, estimatedStart + estimatedLength);
+
+        // 清理結果：移除不必要的換行
+        if (originalPart.indexOf('\n') === -1 && result.indexOf('\n') !== -1) {
+            result = result.replace(/\n/g, '');
+        }
+
+        return result;
+    };
+
     // 翻譯文字（支援 mtool 工具的 key-value 格式）
-    TranslationManager.prototype.translate = function(originalText) {
+    TranslationManager.prototype.translate = function (originalText) {
         if (!originalText || !this._isInitialized) {
             return originalText;
         }
@@ -260,11 +346,29 @@
             }
         }
 
+        // 處理單行文字的特殊情況 (Substring Extraction)
+        if (this._enableSubstringExtraction && originalText.indexOf('\n') === -1) {
+            // 查找包含此文字的完整訊息翻譯
+            for (var key in currentTranslations) {
+                if (currentTranslations.hasOwnProperty(key)) {
+                    // 如果原文是某個完整訊息的子字串，嘗試提取對應的翻譯部分
+                    var keyIndex = key.indexOf(originalText);
+                    if (keyIndex !== -1 && key !== originalText) { // 排除已經檢查過的直接匹配
+                        var translatedKey = currentTranslations[key];
+                        // 正確提取對應的翻譯部分，保持相對位置
+                        var translatedPart = this._extractCorrespondingTranslation(originalText, key, translatedKey, keyIndex);
+                        // console.log('子字串翻譯找到:', originalText, '->', translatedPart, '(來自完整訊息)');
+                        return translatedPart;
+                    }
+                }
+            }
+        }
+
         return originalText;
     };
 
     // 取得翻譯系統狀態（用於調試）
-    TranslationManager.prototype.getStatus = function() {
+    TranslationManager.prototype.getStatus = function () {
         return {
             isInitialized: this._isInitialized,
             currentLanguage: this._currentLanguage,
@@ -277,7 +381,7 @@
     };
 
     // 套用翻譯到 TextManager
-    TranslationManager.prototype._applyTranslations = function() {
+    TranslationManager.prototype._applyTranslations = function () {
         if (!this._isInitialized) return;
 
         // 備份原始的 TextManager 方法
@@ -292,22 +396,22 @@
         var self = this;
 
         // 覆蓋 TextManager 方法
-        TextManager.basic = function(basicId) {
+        TextManager.basic = function (basicId) {
             var originalText = TextManager._originalBasic ? TextManager._originalBasic(basicId) : $dataSystem.terms.basic[basicId] || '';
             return self.translate(originalText);
         };
 
-        TextManager.param = function(paramId) {
+        TextManager.param = function (paramId) {
             var originalText = TextManager._originalParam ? TextManager._originalParam(paramId) : $dataSystem.terms.params[paramId] || '';
             return self.translate(originalText);
         };
 
-        TextManager.command = function(commandId) {
+        TextManager.command = function (commandId) {
             var originalText = TextManager._originalCommand ? TextManager._originalCommand(commandId) : $dataSystem.terms.commands[commandId] || '';
             return self.translate(originalText);
         };
 
-        TextManager.message = function(messageId) {
+        TextManager.message = function (messageId) {
             var originalText = TextManager._originalMessage ? TextManager._originalMessage(messageId) : $dataSystem.terms.messages[messageId] || '';
             return self.translate(originalText);
         };
@@ -315,9 +419,9 @@
         // 處理動態屬性
         if (TextManager._originalGetter) {
             var originalGetter = TextManager._originalGetter;
-            TextManager.getter = function(method, param) {
+            TextManager.getter = function (method, param) {
                 return {
-                    get: function() {
+                    get: function () {
                         var originalText = this[method](param);
                         return self.translate(originalText);
                     }.bind(originalGetter(method, param))
@@ -329,7 +433,7 @@
         if (typeof TextManager.currencyUnit === 'object' && TextManager.currencyUnit.get) {
             var originalCurrencyUnit = $dataSystem ? $dataSystem.currencyUnit : '';
             Object.defineProperty(TextManager, 'currencyUnit', {
-                get: function() {
+                get: function () {
                     return self.translate(originalCurrencyUnit);
                 },
                 configurable: true
@@ -338,13 +442,13 @@
     };
 
     // 重新整理所有視窗
-    TranslationManager.prototype._refreshAllWindows = function() {
+    TranslationManager.prototype._refreshAllWindows = function () {
         if (SceneManager._scene) {
             SceneManager._scene._refreshAllWindows();
         }
 
         // 呼叫所有註冊的重新整理回呼
-        this._refreshCallbacks.forEach(function(callback) {
+        this._refreshCallbacks.forEach(function (callback) {
             if (typeof callback === 'function') {
                 callback();
             }
@@ -352,14 +456,14 @@
     };
 
     // 註冊重新整理回呼
-    TranslationManager.prototype.onRefresh = function(callback) {
+    TranslationManager.prototype.onRefresh = function (callback) {
         if (typeof callback === 'function') {
             this._refreshCallbacks.push(callback);
         }
     };
 
     // 移除重新整理回呼
-    TranslationManager.prototype.offRefresh = function(callback) {
+    TranslationManager.prototype.offRefresh = function (callback) {
         var index = this._refreshCallbacks.indexOf(callback);
         if (index >= 0) {
             this._refreshCallbacks.splice(index, 1);
@@ -372,7 +476,7 @@
 
     // 在 DataManager 載入完成後初始化翻譯管理器
     var _DataManager_onLoad = DataManager.onLoad;
-    DataManager.onLoad = function(object) {
+    DataManager.onLoad = function (object) {
         _DataManager_onLoad.call(this, object);
 
         if (object === $dataSystem) {
@@ -383,10 +487,10 @@
 
     // 擴展 Scene_Base 來支援視窗重新整理
     var _Scene_Base_create = Scene_Base.prototype.create;
-    Scene_Base.prototype.create = function() {
+    Scene_Base.prototype.create = function () {
         _Scene_Base_create.call(this);
-        this._refreshAllWindows = this._refreshAllWindows || function() {
-            this.children.forEach(function(child) {
+        this._refreshAllWindows = this._refreshAllWindows || function () {
+            this.children.forEach(function (child) {
                 if (child.refresh && typeof child.refresh === 'function') {
                     child.refresh();
                 }
@@ -396,24 +500,24 @@
 
     // 擴展 Window_Options 來支援語言選擇
     var _Window_Options_makeCommandList = Window_Options.prototype.makeCommandList;
-    Window_Options.prototype.makeCommandList = function() {
+    Window_Options.prototype.makeCommandList = function () {
         _Window_Options_makeCommandList.call(this);
         this.addLanguageOption();
     };
 
-    Window_Options.prototype.addLanguageOption = function() {
+    Window_Options.prototype.addLanguageOption = function () {
         var languages = this.getAvailableLanguages();
         if (languages.length > 1) {
             this.addCommand('Language / 語言', 'language');
         }
     };
 
-    Window_Options.prototype.getAvailableLanguages = function() {
+    Window_Options.prototype.getAvailableLanguages = function () {
         return $translationManager ? $translationManager.getAvailableLanguages() : ['zh'];
     };
 
     var _Window_Options_statusText = Window_Options.prototype.statusText;
-    Window_Options.prototype.statusText = function(index) {
+    Window_Options.prototype.statusText = function (index) {
         var symbol = this.commandSymbol(index);
         if (symbol === 'language') {
             return this.getCurrentLanguageName();
@@ -421,7 +525,7 @@
         return _Window_Options_statusText.call(this, index);
     };
 
-    Window_Options.prototype.getCurrentLanguageName = function() {
+    Window_Options.prototype.getCurrentLanguageName = function () {
         var currentLang = $translationManager ? $translationManager.getCurrentLanguage() : 'zh';
         var langNames = {
             'zh': '中文',
@@ -437,7 +541,7 @@
         return langNames[currentLang] || currentLang.toUpperCase();
     };
 
-    Window_Options.prototype.processOk = function() {
+    Window_Options.prototype.processOk = function () {
         var index = this.index();
         var symbol = this.commandSymbol(index);
         if (symbol === 'language') {
@@ -447,7 +551,7 @@
         }
     };
 
-    Window_Options.prototype.changeLanguage = function() {
+    Window_Options.prototype.changeLanguage = function () {
         var languages = this.getAvailableLanguages();
         var currentLang = $translationManager ? $translationManager.getCurrentLanguage() : 'zh';
         var currentIndex = languages.indexOf(currentLang);
@@ -463,14 +567,14 @@
 
     // 擴展 ConfigManager 來支援語言設定
     var _ConfigManager_makeData = ConfigManager.makeData;
-    ConfigManager.makeData = function() {
+    ConfigManager.makeData = function () {
         var config = _ConfigManager_makeData.call(this);
         config.language = this.language;
         return config;
     };
 
     var _ConfigManager_applyData = ConfigManager.applyData;
-    ConfigManager.applyData = function(config) {
+    ConfigManager.applyData = function (config) {
         _ConfigManager_applyData.call(this, config);
         this.language = config.language || 'zh';
         if ($translationManager && this.language !== $translationManager.getCurrentLanguage()) {
@@ -480,13 +584,11 @@
 
     // 插件命令
     var _Game_Interpreter_pluginCommand = Game_Interpreter.prototype.pluginCommand;
-    Game_Interpreter.prototype.pluginCommand = function(command, args) {
+    Game_Interpreter.prototype.pluginCommand = function (command, args) {
         _Game_Interpreter_pluginCommand.call(this, command, args);
 
-        if (command === 'SetLanguage' && args.length > 0) {
-            if ($translationManager) {
-                $translationManager.setLanguage(args[0]);
-            }
+        if (command === 'SetLanguage' && args.length > 0 && $translationManager) {
+            $translationManager.setLanguage(args[0]);
         }
     };
 
@@ -496,7 +598,7 @@
 
     // 覆蓋 Game_Message 的 add 方法來支援翻譯
     var _Game_Message_add = Game_Message.prototype.add;
-    Game_Message.prototype.add = function(text) {
+    Game_Message.prototype.add = function (text) {
         if (window.$translationManager && window.$translationManager._isInitialized) {
             text = window.$translationManager.translate(text);
         }
@@ -505,7 +607,7 @@
 
     // 覆蓋 Window_Message 的 startMessage 方法來支援多行翻譯
     var _Window_Message_startMessage = Window_Message.prototype.startMessage;
-    Window_Message.prototype.startMessage = function() {
+    Window_Message.prototype.startMessage = function () {
         _Window_Message_startMessage.call(this);
 
         // 如果翻譯系統已初始化，處理多行文字翻譯
@@ -540,28 +642,28 @@
     };
 
     // 為構造函數添加靜態方法
-    TranslationManager.getStatus = function() {
+    TranslationManager.getStatus = function () {
         if (window.$translationManager) {
             return window.$translationManager.getStatus();
         }
         return null;
     };
 
-    TranslationManager.setLanguage = function(language) {
+    TranslationManager.setLanguage = function (language) {
         if (window.$translationManager) {
             return window.$translationManager.setLanguage(language);
         }
         return null;
     };
 
-    TranslationManager.getCurrentLanguage = function() {
+    TranslationManager.getCurrentLanguage = function () {
         if (window.$translationManager) {
             return window.$translationManager.getCurrentLanguage();
         }
         return null;
     };
 
-    TranslationManager.getAvailableLanguages = function() {
+    TranslationManager.getAvailableLanguages = function () {
         if (window.$translationManager) {
             return window.$translationManager.getAvailableLanguages();
         }
@@ -569,7 +671,7 @@
     };
 
     // 為 DTextPicture 插件提供的方法
-    TranslationManager.translateIfNeed = function(text, callback) {
+    TranslationManager.translateIfNeed = function (text, callback) {
         if (window.$translationManager && window.$translationManager._isInitialized) {
             var translatedText = window.$translationManager.translate(text);
             if (callback && typeof callback === 'function') {
@@ -585,14 +687,14 @@
     };
 
     // 立即初始化翻譯管理器（如果系統資料已載入）
-    var initTranslationManager = function() {
+    var initTranslationManager = function () {
         if (window.$translationManager && !$translationManager._isInitialized) {
             if ($dataSystem) {
                 $translationManager.initialize();
             } else {
                 // 在 DataManager 載入完成後初始化翻譯管理器
                 var _DataManager_onLoad = DataManager.onLoad;
-                DataManager.onLoad = function(object) {
+                DataManager.onLoad = function (object) {
                     _DataManager_onLoad.call(this, object);
 
                     if (object === $dataSystem) {

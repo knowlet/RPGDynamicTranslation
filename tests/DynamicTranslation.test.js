@@ -19,7 +19,8 @@ describe('DynamicTranslation System', () => {
                 'HP': '生命值',
                 'Attack': '攻擊力',
                 'Save which file?': '要儲存哪個檔案？',
-                '%1 found!': '發現了 %1！'
+                '%1 found!': '發現了 %1！',
+                '「"強制能力解除装置"。使いどころが大事ですよね。\n 並の戦闘員やロボットではこの装置なしではレミリアに傷一つ付けられませんが…」': '「强制能力解除装置」。使用时机很重要呢。\n 普通的战斗员或机器人如果没有这个装置，连在蕾米莉亚身上留下一道伤痕都做不到…」'
             },
             en: {
                 'Level': 'Level',
@@ -104,4 +105,57 @@ describe('DynamicTranslation System', () => {
             done();
         });
     });
+
+    test('should handle translations with newlines', (done) => {
+        const tm = window.$translationManager;
+        const originalText = '「"強制能力解除装置"。使いどころが大事ですよね。\n 並の戦闘員やロボットではこの装置なしではレミリアに傷一つ付けられませんが…」';
+        const expectedText = '「强制能力解除装置」。使用时机很重要呢。\n 普通的战斗员或机器人如果没有这个装置，连在蕾米莉亚身上留下一道伤痕都做不到…」';
+
+        tm.loadLanguage('zh', () => {
+            tm.setLanguage('zh');
+            expect(tm.translate(originalText)).toBe(expectedText);
+            done();
+        });
+    });
+
+    test('should extract substring translation in full mode', (done) => {
+        // Enable full mode
+        PluginManager.parameters = () => ({
+            'Default Language': 'zh',
+            'Translation Path': 'translations/',
+            'Auto Detect Translations': 'false',
+            'Translation Mode': 'full'
+        });
+
+        // Reload plugin to pick up new parameters
+        global.loadPlugin();
+
+        const tm = window.$translationManager;
+        const fullOriginal = '「"強制能力解除装置"。使いどころが大事ですよね。\n 並の戦闘員やロボットではこの装置なしではレミリアに傷一つ付けられませんが…」';
+        const fullTranslated = '「强制能力解除装置」。使用时机很重要呢。\n 普通的战斗员或机器人如果没有这个装置，连在蕾米莉亚身上留下一道伤痕都做不到…」';
+
+        // Parts
+        const part1 = '「"強制能力解除装置"。使いどころが大事ですよね。';
+        const part2 = ' 並の戦闘員やロボットではこの装置なしではレミリアに傷一つ付けられませんが…」';
+
+        const expectedPart1 = '「强制能力解除装置」。使用时机很重要呢。';
+        const expectedPart2 = ' 普通的战斗员或机器人如果没有这个装置，连在蕾米莉亚身上留下一道伤痕都做不到…」';
+
+        // Mock data with ONLY the full translation
+        XMLHttpRequest.prototype.mockData = {
+            zh: {
+                [fullOriginal]: fullTranslated
+            }
+        };
+
+        tm.loadLanguage('zh', () => {
+            tm.setLanguage('zh');
+
+            // Should extract from full translation
+            expect(tm.translate(part1)).toBe(expectedPart1);
+            expect(tm.translate(part2)).toBe(expectedPart2);
+            done();
+        });
+    });
 });
+

@@ -35,7 +35,8 @@ global.PluginManager = {
     parameters: () => ({
         'Default Language': 'zh',
         'Translation Path': 'translations/',
-        'Auto Detect Translations': 'false' // Default to false for easier testing control
+        'Auto Detect Translations': 'false', // Default to false for easier testing control
+        'Translation Mode': 'simple'
     })
 };
 
