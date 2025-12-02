@@ -1,6 +1,6 @@
 # RPG Maker 動態翻譯系統 (Dynamic Translation System)
 
-這是一個專為 RPG Maker MV/MZ 設計的動態翻譯插件，支援載入外部 JSON 翻譯檔案，並在遊戲中即時切換語言。
+這是一個專為 RPG Maker MV/MZ 設計的動態翻譯外掛，支援載入外部 JSON 翻譯檔案，並在遊戲中即時切換語言。
 
 ## ✨ 功能特色
 
@@ -8,7 +8,7 @@
 *   **即時切換**：玩家可以在選項選單中隨時切換語言。
 *   **格式支援**：支援 mtool 工具生成的 key-value JSON 格式。
 *   **自動偵測**：自動偵測並載入 `translations/` 資料夾下的語言檔案。
-*   **簡易安裝**：提供自動化安裝腳本，一鍵配置。
+*   **簡易安裝**：提供自動化安裝腳本，一鍵設定。
 
 ---
 
@@ -18,7 +18,7 @@
 
 ### 🚀 快速安裝
 
-我們提供了一個 Python 腳本來自動化安裝過程。此腳本會將插件複製到您的專案中，並自動設定 `plugins.js`。
+我們提供了一個 Python 腳本來自動化安裝過程。此腳本會將外掛複製到您的專案中，並自動設定 `plugins.js`。
 
 1.  確保您已安裝 Python 3。
 2.  下載此專案。
@@ -31,7 +31,7 @@ python3 install_plugin.py ../MyRPGProject
 
 腳本會自動執行以下動作：
 *   複製 `DynamicTranslation.js` 到 `js/plugins/`。
-*   更新 `js/plugins.js` 以啟用插件。
+*   更新 `js/plugins.js` 以啟用外掛。
 *   自動搜尋專案根目錄下的 JSON 翻譯檔（如 `A翻譯.json`），並將其安裝為預設中文翻譯 (`translations/zh.json`)。
 
 ### 📦 手動安裝
@@ -39,8 +39,8 @@ python3 install_plugin.py ../MyRPGProject
 如果您無法使用腳本，也可以手動安裝：
 
 1.  將 `DynamicTranslation.js` 複製到您專案的 `js/plugins/` 資料夾。
-2.  開啟 RPG Maker 編輯器，進入「插件管理器 (Plugin Manager)」。
-3.  新增 `DynamicTranslation` 插件並開啟狀態為 ON。
+2.  開啟 RPG Maker 編輯器，進入「外掛管理器 (Plugin Manager)」。
+3.  新增 `DynamicTranslation` 外掛並開啟狀態為 ON。
 4.  在專案根目錄建立 `translations/` 資料夾。
 
 ### 📝 準備翻譯檔案
@@ -62,12 +62,12 @@ python3 install_plugin.py ../MyRPGProject
 ### 🎮 遊戲內使用
 
 #### 1. 選項選單
-插件會自動在「選項 (Options)」選單中加入「Language / 語言」選項，玩家可以直接在此切換。
+外掛會自動在「選項 (Options)」選單中加入「Language / 語言」選項，玩家可以直接在此切換。
 
 #### 2. 事件指令
 您也可以透過事件指令來控制語言：
 
-*   **插件命令 (Plugin Command)**:
+*   **外掛命令 (Plugin Command)**:
     *   `SetLanguage en` (切換為英文)
     *   `SetLanguage zh` (切換為中文)
 
@@ -80,7 +80,7 @@ python3 install_plugin.py ../MyRPGProject
 
 ## 🛠️ 開發者指南 (Developer Guide)
 
-如果您想協助改進此插件或進行二次開發，請參考以下說明。
+如果您想協助改進此外掛或進行二次開發，請參考以下說明。
 
 ### 環境建置
 
@@ -104,12 +104,12 @@ npm test
 
 ### 專案結構
 
-*   `DynamicTranslation.js`: 插件核心程式碼 (IIFE 格式)。
+*   `DynamicTranslation.js`: 外掛核心程式碼 (IIFE 格式)。
 *   `install_plugin.py`: 自動安裝腳本 (Python)。
 *   `tests/`: 測試檔案目錄。
     *   `setup.js`: 模擬 RPG Maker 全域變數與瀏覽器環境。
     *   `DynamicTranslation.test.js`: 主要測試邏輯。
-*   `.github/workflows/`: CI/CD 自動化測試配置。
+*   `.github/workflows/`: CI/CD 自動化測試設定。
 
 ### 貢獻方式
 

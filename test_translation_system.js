@@ -17,7 +17,7 @@
  * TranslationManager.getCurrentLanguage(); // 取得當前語言
  * TranslationManager.getAvailableLanguages(); // 取得可用語言列表
  *
- * 或者使用插件命令：
+ * 或者使用外掛命令：
  * SetLanguage zh
  *
  * 注意：TranslationManager 是構造函數，$translationManager 是實例
@@ -33,13 +33,13 @@
         console.log('=== 翻譯系統狀態檢查 ===');
 
         if (typeof TranslationManager === 'undefined') {
-            console.error('❌ TranslationManager 未定義 - 插件可能未正確載入');
-            console.log('請確認 DynamicTranslation.js 插件已正確加入並啟用');
+            console.error('❌ TranslationManager 未定義 - 外掛可能未正確載入');
+            console.log('請確認 DynamicTranslation.js 外掛已正確加入並啟用');
             return false;
         }
 
         if (typeof $translationManager === 'undefined') {
-            console.error('❌ $translationManager 未定義 - 插件實例未正確創建');
+            console.error('❌ $translationManager 未定義 - 外掛實例未正確創建');
             return false;
         }
 
@@ -143,7 +143,7 @@
 
         var systemOk = checkTranslationSystem();
         if (!systemOk) {
-            return '翻譯系統載入失敗，請檢查插件設定';
+            return '翻譯系統載入失敗，請檢查外掛設定';
         }
 
         testTranslations();

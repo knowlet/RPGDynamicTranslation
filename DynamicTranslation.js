@@ -24,7 +24,7 @@
  * 動態翻譯系統 - 支援 mtool 工具格式
  * ============================================================================
  *
- * 此插件支援從 mtool 工具生成的 key-value 格式翻譯檔案。
+ * 此外掛支援從 mtool 工具生成的 key-value 格式翻譯檔案。
  * 可以在遊戲運行時動態載入翻譯檔案並即時切換語言。
  *
  * 翻譯檔案結構:
@@ -74,7 +74,7 @@
  *   TranslationManager.getCurrentLanguage(); // 取得當前語言
  *   TranslationManager.getAvailableLanguages(); // 取得可用語言列表
  *
- * 插件命令:
+ * 外掛命令:
  *   SetLanguage en    // 切換到英文
  *   SetLanguage zh    // 切換到中文
  *
@@ -84,7 +84,7 @@
 (function () {
     'use strict';
 
-    // 插件參數
+    // 外掛參數
     var parameters = PluginManager.parameters('DynamicTranslation');
     var defaultLanguage = parameters['Default Language'] || 'zh';
     var translationPath = parameters['Translation Path'] || 'translations/';
@@ -582,7 +582,7 @@
         }
     };
 
-    // 插件命令
+    // 外掛命令
     var _Game_Interpreter_pluginCommand = Game_Interpreter.prototype.pluginCommand;
     Game_Interpreter.prototype.pluginCommand = function (command, args) {
         _Game_Interpreter_pluginCommand.call(this, command, args);
@@ -670,7 +670,7 @@
         return [];
     };
 
-    // 為 DTextPicture 插件提供的方法
+    // 為 DTextPicture 外掛提供的方法
     TranslationManager.translateIfNeed = function (text, callback) {
         if (window.$translationManager && window.$translationManager._isInitialized) {
             var translatedText = window.$translationManager.translate(text);
