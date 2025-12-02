@@ -112,9 +112,29 @@
         var nextIndex = (languages.indexOf(currentLang) + 1) % languages.length;
         var nextLang = languages[nextIndex];
 
+        // 取得切換前的翻譯（以 '戦う' 為例）
+        var keyToTest = '戦う';
+        var translationBefore = $translationManager ? $translationManager.translate(keyToTest) : keyToTest;
+
         console.log('當前語言:', currentLang, '切換到:', nextLang);
         TranslationManager.setLanguage(nextLang);
         console.log('切換完成');
+
+        // 驗證語言已切換
+        var currentAfterSwitch = TranslationManager.getCurrentLanguage();
+        if (currentAfterSwitch !== nextLang) {
+            throw new Error('語言切換失敗，當前語言: ' + currentAfterSwitch + ' 預期: ' + nextLang);
+        } else {
+            console.log('✅ 語言切換成功，當前語言:', currentAfterSwitch);
+        }
+
+        // 驗證翻譯有更新
+        var translationAfter = $translationManager ? $translationManager.translate(keyToTest) : keyToTest;
+        if (translationBefore === translationAfter) {
+            throw new Error('翻譯未更新，key: ' + keyToTest + ' 切換前: ' + translationBefore + ' 切換後: ' + translationAfter);
+        } else {
+            console.log('✅ 翻譯已更新，key:', keyToTest, '切換前:', translationBefore, '切換後:', translationAfter);
+        }
     };
 
     // 公開測試函數到全域
@@ -153,7 +173,7 @@
             ];
 
             console.log('測試 Game_Message 翻譯:');
-            testTexts.forEach(function(text, index) {
+            testTexts.forEach(function(text) {
                 var translated = $translationManager ? $translationManager.translate(text) : text;
                 console.log('原始:', text, '翻譯:', translated);
             });
@@ -165,6 +185,16 @@
             $gameMessage.add('得到 100 經驗值！');
             var allText = $gameMessage.allText();
             console.log('Game_Message 所有文字:', allText);
+
+            // 驗證 $gameMessage.allText() 是否回傳預期的翻譯結果
+            var expectedText1 = $translationManager ? $translationManager.translate('測試訊息') : '測試訊息';
+            var expectedText2 = $translationManager ? $translationManager.translate('得到 100 經驗值！') : '得到 100 經驗值！';
+            var expectedAllText = expectedText1 + '\n' + expectedText2;
+            if (allText === expectedAllText) {
+                console.log('✅ $gameMessage.allText() 輸出正確');
+            } else {
+                throw new Error('❌ $gameMessage.allText() 輸出錯誤，預期: ' + expectedAllText + ' 實際: ' + allText);
+            }
 
         } catch (e) {
             console.error('Game_Message 測試失敗:', e);
@@ -249,8 +279,11 @@
                     '戰鬥',  // command(0) 應該翻譯為 "戰鬥"
                     '要儲存這個檔案嗎？' // message(saveMessage) 應該翻譯為 "要儲存這個檔案嗎？"
                 ];
-                var status = text === expectedTranslations[index] ? '✅' : '❌';
-                console.log('TextManager[' + index + ']:', text, status, '(預期:', expectedTranslations[index] + ')');
+                if (text !== expectedTranslations[index]) {
+                    throw new Error('TextManager[' + index + '] 錯誤: 取得 "' + text + '"，預期 "' + expectedTranslations[index] + '"');
+                } else {
+                    console.log('✅ TextManager[' + index + ']: "' + text + '"');
+                }
             });
 
             // 檢查翻譯系統狀態

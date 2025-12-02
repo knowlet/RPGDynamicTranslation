@@ -57,7 +57,8 @@ global.TextManager = {
     param: (id) => global.$dataSystem.terms.params[id],
     command: (id) => global.$dataSystem.terms.commands[id],
     message: (id) => global.$dataSystem.terms.messages[id],
-    getter: (method, param) => ({ get: () => 'MockGetterValue' })
+    getter: (_method, _param) => ({ get: () => 'MockGetterValue' }),
+    currencyUnit: 'G' // Initial currency unit value
 };
 
 global.SceneManager = {
@@ -99,7 +100,7 @@ global.SoundManager = {
 };
 
 global.DataManager = {
-    onLoad: function (object) { }
+    onLoad: function (_object) { }
 };
 
 global.Scene_Base = class {
@@ -114,5 +115,6 @@ global.Window_Command = class {
 global.loadPlugin = () => {
     const pluginPath = path.resolve(__dirname, '../DynamicTranslation.js');
     const pluginContent = fs.readFileSync(pluginPath, 'utf8');
+    // eslint-disable-next-line no-eval
     eval(pluginContent);
 };
