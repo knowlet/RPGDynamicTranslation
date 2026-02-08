@@ -1,4 +1,4 @@
-name: Node.js CI
+name: CI
 
 on:
   push:
@@ -7,20 +7,31 @@ on:
     branches: [ "main", "master" ]
 
 jobs:
-  build:
-
+  node:
+    name: Node.js
     runs-on: ubuntu-latest
-
     strategy:
       matrix:
         node-version: [18.x, 20.x]
-
     steps:
-    - uses: actions/checkout@v4
-    - name: Use Node.js ${{ matrix.node-version }}
-      uses: actions/setup-node@v4
-      with:
-        node-version: ${{ matrix.node-version }}
-        cache: 'npm'
-    - run: npm ci
-    - run: npm test
+      - uses: actions/checkout@v4
+      - name: Use Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: 'npm'
+      - run: npm ci
+      - run: npm test
+
+  python:
+    name: Python (pytest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: pip install pytest -q
+      - name: Run pytest
+        run: pytest tests/test_install_plugin.py -v

@@ -2,6 +2,7 @@ import sys
 import os
 import shutil
 import json
+from pathlib import Path
 
 PLUGIN_CONFIG = {
     "name": "DynamicTranslation",
@@ -16,22 +17,53 @@ PLUGIN_CONFIG = {
 
 
 def get_paths():
-    arg_dir = sys.argv[1] if len(sys.argv) > 1 else os.getcwd()
-    target_dir = os.path.abspath(arg_dir)
-    if not os.path.isdir(target_dir):
-        raise SystemExit(f"Invalid target directory: {target_dir}")
+    # Use pathlib.Path for better unicode path handling
+    if len(sys.argv) > 1:
+        arg_dir = sys.argv[1]
+        # Ensure proper unicode handling - pathlib handles this better than os.path
+        target_path = Path(arg_dir).resolve()
+    else:
+        target_path = Path.cwd().resolve()
+    
+    if not target_path.is_dir():
+        raise SystemExit(f"Invalid target directory: {target_path}")
 
-    # Check if is in RPG Maker project www directory
-    www_dir = os.path.join(target_dir, "www")
-    if not os.path.isdir(www_dir):
-        raise SystemExit(f"Invalid target directory: {target_dir}")
+    # Check for RPG Maker project structure
+    # Support both traditional (project/www/js/) and exported/flat (project/js/) structures
+    www_path = target_path / "www"
+    js_path_in_www = www_path / "js"
+    js_path_direct = target_path / "js"
+    plugins_path_in_www = js_path_in_www / "plugins"
+    plugins_path_direct = js_path_direct / "plugins"
+    
+    if www_path.is_dir() and js_path_in_www.is_dir():
+        # Traditional structure: project/www/js/
+        www_dir = www_path
+        js_path = js_path_in_www
+    elif js_path_direct.is_dir():
+        # Exported/flat structure: project/js/ (no www subdirectory)
+        # Even without www, if js/plugins exists, we can install
+        # Treat the project root as the "www" equivalent
+        www_dir = target_path
+        js_path = js_path_direct
+        if plugins_path_direct.is_dir():
+            print("Note: Detected exported/flat RPG Maker project structure (no www subdirectory)")
+        else:
+            print("Note: Detected exported/flat RPG Maker project structure (no www subdirectory)")
+            print(f"Warning: plugins directory not found at {plugins_path_direct}")
+    else:
+        # Neither structure found
+        raise SystemExit(
+            f"Invalid target directory: {target_path}\n"
+            "Expected RPG Maker project with either:\n"
+            "  - Traditional structure: project/www/js/\n"
+            "  - Exported structure: project/js/ (with or without plugins subdirectory)"
+        )
 
-    # Basic sanity: must contain js directory
-    js_dir = os.path.join(www_dir, "js")
-    if not os.path.isdir(js_dir):
-        print(f"Warning: {js_dir} not found; continuing but some steps may be skipped.")
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    return target_dir, www_dir, script_dir
+    script_path = Path(__file__).resolve().parent
+    
+    # Return as strings for backward compatibility with rest of code
+    return str(target_path), str(www_dir), str(script_path)
 
 
 def copy_plugin_file(script_dir, target_dir):
@@ -39,12 +71,10 @@ def copy_plugin_file(script_dir, target_dir):
     plugin_dest_dir = os.path.join(target_dir, "js", "plugins")
     plugin_dest = os.path.join(plugin_dest_dir, "DynamicTranslation.js")
 
+    # Create plugins directory if it doesn't exist
     if not os.path.exists(plugin_dest_dir):
-        print(f"Error: plugins directory not found at {plugin_dest_dir}")
-        print(
-            "Make sure you are running this script in the root of an RPG Maker project."
-        )
-        sys.exit(1)
+        print(f"Creating plugins directory at {plugin_dest_dir}...")
+        os.makedirs(plugin_dest_dir, exist_ok=True)
 
     print("Copying DynamicTranslation.js...")
     shutil.copy2(plugin_source, plugin_dest)
@@ -88,8 +118,11 @@ def update_plugins_js(target_dir):
     print("plugins.js updated successfully.")
 
 
-def install_translation(target_dir):
-    translations_dir = os.path.join(target_dir, "www", "translations")
+def install_translation(target_dir, www_dir):
+    # translations folder should be relative to where HTML file is located
+    # For traditional structure: www/translations/ (HTML is in www/)
+    # For exported structure: translations/ (HTML is in project root, www_dir == target_dir)
+    translations_dir = os.path.join(www_dir, "translations")
     print("Searching for translation files...")
 
     if not os.path.exists(translations_dir):
@@ -133,7 +166,7 @@ def main():
 
     copy_plugin_file(script_dir, www_dir)
     update_plugins_js(www_dir)
-    install_translation(target_dir)
+    install_translation(target_dir, www_dir)
 
     print("Installation complete!")
 
