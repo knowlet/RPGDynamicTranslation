@@ -215,7 +215,7 @@ class TestUpdatePluginsJs:
 
     def test_skips_when_plugin_already_registered(self, tmp_path, capsys):
         _make_rpg_project(tmp_path)
-        # Use compact format - install_plugin checks for '"name":"DynamicTranslation"'
+        # Keep support for the compact format emitted by RPG Maker.
         (tmp_path / "www" / "js").mkdir(parents=True, exist_ok=True)
         plugins_path = tmp_path / "www" / "js" / "plugins.js"
         plugins_path.write_text('[{"name":"DynamicTranslation","status":true}]', encoding="utf-8")
@@ -228,6 +228,51 @@ class TestUpdatePluginsJs:
         assert new_content == original_content
         out = capsys.readouterr().out.lower()
         assert "skipping" in out
+
+    @pytest.mark.parametrize("indent", [None, 2])
+    def test_skips_existing_registration_with_json_whitespace(self, tmp_path, indent):
+        _make_rpg_project(tmp_path)
+        plugins_path = tmp_path / "www" / "js" / "plugins.js"
+        existing = [{
+            "name": "DynamicTranslation",
+            "status": False,
+            "parameters": {"Default Language": "ja"},
+        }]
+        content = "var $plugins = " + json.dumps(existing, indent=indent) + ";\n"
+        plugins_path.write_text(content, encoding="utf-8")
+
+        from install_plugin import update_plugins_js
+
+        update_plugins_js(str(tmp_path / "www"))
+
+        # Existing status, user parameters and formatting must stay untouched.
+        assert plugins_path.read_text(encoding="utf-8") == content
+
+    @pytest.mark.parametrize("with_other_plugin", [False, True])
+    def test_repeated_registration_is_idempotent(self, tmp_path, with_other_plugin):
+        _make_rpg_project(tmp_path)
+        existing = (
+            [{"name": "OtherPlugin", "status": True}] if with_other_plugin else []
+        )
+        plugins_path = _make_plugins_js(tmp_path, existing)
+        plugins_path.write_text(
+            "var $plugins = " + plugins_path.read_text(encoding="utf-8") + ";\n",
+            encoding="utf-8",
+        )
+
+        from install_plugin import update_plugins_js
+
+        update_plugins_js(str(tmp_path / "www"))
+        first_install = plugins_path.read_text(encoding="utf-8")
+        update_plugins_js(str(tmp_path / "www"))
+        second_install = plugins_path.read_text(encoding="utf-8")
+
+        assert second_install == first_install
+        entries = json.loads(
+            second_install.removeprefix("var $plugins = ").rstrip(";\n")
+        )
+        assert sum(entry["name"] == "DynamicTranslation" for entry in entries) == 1
+        assert len(entries) == len(existing) + 1
 
     def test_handles_missing_plugins_js(self, tmp_path, capsys):
         _make_rpg_project(tmp_path)

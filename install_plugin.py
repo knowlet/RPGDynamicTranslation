@@ -2,6 +2,7 @@ import sys
 import os
 import shutil
 import json
+import re
 from pathlib import Path
 
 PLUGIN_CONFIG = {
@@ -92,7 +93,7 @@ def update_plugins_js(target_dir):
     with open(plugins_js_path, "r", encoding="utf-8") as f:
         content = f.read()
 
-    if '"name":"DynamicTranslation"' in content:
+    if re.search(r'"name"\s*:\s*"DynamicTranslation"', content):
         print("DynamicTranslation is already in plugins.js. Skipping update.")
         return
 
