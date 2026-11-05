@@ -34,6 +34,8 @@ python3 install_plugin.py ../MyRPGProject
 *   更新 `js/plugins.js` 以啟用外掛。
 *   自動搜尋專案根目錄下的 JSON 翻譯檔（如 `A翻譯.json`），並將其安裝為預設中文翻譯 (`translations/zh.json`)。
 
+自動註冊支援 RPG Maker 產生的 JSON 外掛清單，並保留前後的註解及既有外掛設定。若清單包含自訂 JavaScript 運算式、陣列內註解、尾端逗號或格式錯誤，腳本會保留 `plugins.js` 原文並以非零狀態結束；此外掛檔案可能已複製，請改用下方的手動註冊方式。
+
 ### 📦 手動安裝
 
 如果您無法使用腳本，也可以手動安裝：
