@@ -90,31 +90,46 @@ def update_plugins_js(target_dir):
         return
 
     print("Updating plugins.js...")
-    with open(plugins_js_path, "r", encoding="utf-8") as f:
+    with open(plugins_js_path, "r", encoding="utf-8", newline="") as f:
         content = f.read()
 
-    if re.search(r'"name"\s*:\s*"DynamicTranslation"', content):
+    # RPG Maker emits a JSON array after an assignment and optional comments.
+    # Parse that array, not brackets or name-like text in comments/parameters.
+    trivia_pattern = r'(?:\s+|//[^\r\n]*(?:\r\n?|\n|$)|/\*.*?\*/)*'
+    prefix_match = re.match(
+        r'\A\ufeff?' + trivia_pattern +
+        r'(?:(?:var|let|const)\s+\$plugins\s*=\s*)?',
+        content,
+        re.DOTALL,
+    )
+    array_start = prefix_match.end()
+    try:
+        if content[array_start:array_start + 1] != "[":
+            raise ValueError("expected a JSON plugin array")
+        plugins, array_end = json.JSONDecoder().raw_decode(content, array_start)
+        if not all(isinstance(plugin, dict) for plugin in plugins):
+            raise ValueError("plugin entries must be objects")
+        suffix = content[array_end:]
+        trivia_end = re.match(trivia_pattern, suffix, re.DOTALL).end()
+        if suffix[trivia_end:] and suffix[trivia_end] != ";":
+            raise ValueError("expected the JSON array to end the assignment")
+    except (ValueError, RecursionError) as error:
+        print(f"Error: Could not parse plugins.js ({error}). File left unchanged.")
+        return False
+
+    if any(plugin.get("name") == "DynamicTranslation" for plugin in plugins):
         print("DynamicTranslation is already in plugins.js. Skipping update.")
         return
 
     plugin_string = json.dumps(PLUGIN_CONFIG, ensure_ascii=False)
 
-    # Find the last closing bracket
-    last_bracket_index = content.rfind("]")
-    if last_bracket_index == -1:
-        print("Error: Could not parse plugins.js (could not find closing bracket).")
-        return
-
-    before_bracket = content[:last_bracket_index].rstrip()
-    after_bracket = content[last_bracket_index:]
-
-    # Check if we need a comma: if before_bracket not empty and last char != '['
-    needs_comma = bool(before_bracket) and before_bracket[-1] != "["
-    prefix = ", " if needs_comma else ""
+    before_bracket = content[:array_end - 1].rstrip()
+    after_bracket = content[array_end - 1:]
+    prefix = ", " if plugins else ""
 
     new_content = f"{before_bracket}\n{prefix}{plugin_string}\n{after_bracket}"
 
-    with open(plugins_js_path, "w", encoding="utf-8") as f:
+    with open(plugins_js_path, "w", encoding="utf-8", newline="") as f:
         f.write(new_content)
     print("plugins.js updated successfully.")
 
@@ -166,7 +181,11 @@ def main():
     print(f"Target directory: {target_dir}")
 
     copy_plugin_file(script_dir, www_dir)
-    update_plugins_js(www_dir)
+    if update_plugins_js(www_dir) is False:
+        raise SystemExit(
+            "Registration failed; plugins.js was not changed. "
+            "Use RPG Maker's Plugin Manager for manual registration."
+        )
     install_translation(target_dir, www_dir)
 
     print("Installation complete!")
