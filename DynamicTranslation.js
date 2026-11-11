@@ -541,13 +541,14 @@
         return langNames[currentLang] || currentLang.toUpperCase();
     };
 
+    var _Window_Options_processOk = Window_Options.prototype.processOk;
     Window_Options.prototype.processOk = function () {
         var index = this.index();
         var symbol = this.commandSymbol(index);
         if (symbol === 'language') {
             this.changeLanguage();
         } else {
-            Window_Command.prototype.processOk.call(this);
+            return _Window_Options_processOk.apply(this, arguments);
         }
     };
 
