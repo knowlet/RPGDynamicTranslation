@@ -541,13 +541,32 @@
         return langNames[currentLang] || currentLang.toUpperCase();
     };
 
+    var _Window_Options_processOk = Window_Options.prototype.processOk;
     Window_Options.prototype.processOk = function () {
         var index = this.index();
         var symbol = this.commandSymbol(index);
         if (symbol === 'language') {
             this.changeLanguage();
         } else {
-            Window_Command.prototype.processOk.call(this);
+            return _Window_Options_processOk.apply(this, arguments);
+        }
+    };
+
+    var _Window_Options_cursorRight = Window_Options.prototype.cursorRight;
+    Window_Options.prototype.cursorRight = function () {
+        if (this.commandSymbol(this.index()) === 'language') {
+            this.changeLanguage();
+        } else {
+            return _Window_Options_cursorRight.apply(this, arguments);
+        }
+    };
+
+    var _Window_Options_cursorLeft = Window_Options.prototype.cursorLeft;
+    Window_Options.prototype.cursorLeft = function () {
+        if (this.commandSymbol(this.index()) === 'language') {
+            this.changeLanguage();
+        } else {
+            return _Window_Options_cursorLeft.apply(this, arguments);
         }
     };
 
