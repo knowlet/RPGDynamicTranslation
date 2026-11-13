@@ -552,6 +552,24 @@
         }
     };
 
+    var _Window_Options_cursorRight = Window_Options.prototype.cursorRight;
+    Window_Options.prototype.cursorRight = function () {
+        if (this.commandSymbol(this.index()) === 'language') {
+            this.changeLanguage();
+        } else {
+            return _Window_Options_cursorRight.apply(this, arguments);
+        }
+    };
+
+    var _Window_Options_cursorLeft = Window_Options.prototype.cursorLeft;
+    Window_Options.prototype.cursorLeft = function () {
+        if (this.commandSymbol(this.index()) === 'language') {
+            this.changeLanguage();
+        } else {
+            return _Window_Options_cursorLeft.apply(this, arguments);
+        }
+    };
+
     Window_Options.prototype.changeLanguage = function () {
         var languages = this.getAvailableLanguages();
         var currentLang = $translationManager ? $translationManager.getCurrentLanguage() : 'zh';
