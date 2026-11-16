@@ -181,6 +181,12 @@
             if (xhr.status < 400) {
                 try {
                     var translations = JSON.parse(xhr.responseText);
+                    if (!translations || typeof translations !== 'object' || Array.isArray(translations) ||
+                        !Object.keys(translations).every(function (key) {
+                            return typeof translations[key] === 'string';
+                        })) {
+                        throw new Error('Translation file must be an object with string values');
+                    }
                     this._translations[language] = translations;
                     console.log('翻譯載入成功:', language, Object.keys(translations).length, '個項目');
                     console.log('載入的翻譯項目範例:', Object.keys(translations).slice(0, 5));
