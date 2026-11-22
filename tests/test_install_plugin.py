@@ -388,6 +388,118 @@ class TestUpdatePluginsJs:
         assert "Installation complete" not in result.stdout
         assert plugins_path.read_text(encoding="utf-8") == content
 
+    @pytest.mark.parametrize(
+        "character,escape",
+        [("\u2028", r"\u2028"), ("\u2029", r"\u2029")],
+        ids=["U+2028", "U+2029"],
+    )
+    def test_emitted_registration_escapes_js_line_terminator(
+        self, tmp_path, monkeypatch, character, escape
+    ):
+        import install_plugin
+
+        config = json.loads(json.dumps(install_plugin.PLUGIN_CONFIG))
+        config["description"] = f"before{character}after"
+        config["parameters"] = {
+            **config["parameters"],
+            "Note": f"key{character}value",
+        }
+        monkeypatch.setattr(install_plugin, "PLUGIN_CONFIG", config)
+
+        _make_rpg_project(tmp_path)
+        plugins_path = _make_plugins_js(tmp_path)
+        plugins_path.write_text("var $plugins = [];\n", encoding="utf-8")
+
+        assert install_plugin.update_plugins_js(str(tmp_path / "www")) is None
+        content = plugins_path.read_text(encoding="utf-8")
+        assert install_plugin.update_plugins_js(str(tmp_path / "www")) is None
+
+        assert plugins_path.read_text(encoding="utf-8") == content
+        assert character not in content
+        assert escape in content
+        entries = json.loads(content.removeprefix("var $plugins = ").rstrip(";\n"))
+        assert entries == [config]
+
+    def test_embed_json_escapes_both_line_separators_in_strings(self):
+        from install_plugin import _embed_json_in_javascript
+
+        value = {
+            "line\u2028": "paragraph\u2029",
+            "nested": ["both\u2028\u2029"],
+        }
+        literal = _embed_json_in_javascript(value)
+
+        assert "\u2028" not in literal
+        assert "\u2029" not in literal
+        assert r"\u2028" in literal
+        assert r"\u2029" in literal
+        assert json.loads(literal) == value
+
+    @pytest.mark.parametrize(
+        "character",
+        ["\u2028", "\u2029"],
+        ids=["U+2028", "U+2029"],
+    )
+    def test_line_comment_ends_at_unicode_line_terminator(self, tmp_path, character):
+        _make_rpg_project(tmp_path)
+        plugins_path = _make_plugins_js(tmp_path)
+        prefix = f"// hidden{character}var $plugins = "
+        plugins_path.write_text(prefix + "[]", encoding="utf-8")
+
+        from install_plugin import update_plugins_js
+
+        update_plugins_js(str(tmp_path / "www"))
+        content = plugins_path.read_text(encoding="utf-8")
+        assert content.startswith(prefix)
+        assert character not in content[len(prefix):]
+        entries, _ = json.JSONDecoder().raw_decode(content, len(prefix))
+        assert [entry["name"] for entry in entries] == ["DynamicTranslation"]
+
+    @pytest.mark.parametrize(
+        "character",
+        ["\u2028", "\u2029"],
+        ids=["U+2028", "U+2029"],
+    )
+    def test_code_after_unicode_line_terminator_is_not_comment_trivia(
+        self, tmp_path, capsys, character
+    ):
+        # No semicolon: in JavaScript the comment ends at the line separator,
+        # so injected() is a real statement and the assignment must be rejected.
+        _make_rpg_project(tmp_path)
+        plugins_path = _make_plugins_js(tmp_path)
+        content = f"var $plugins = [] // end{character}injected();\n"
+        plugins_path.write_text(content, encoding="utf-8")
+
+        from install_plugin import update_plugins_js
+
+        assert update_plugins_js(str(tmp_path / "www")) is False
+        assert plugins_path.read_text(encoding="utf-8") == content
+        assert "Error:" in capsys.readouterr().out
+
+    @pytest.mark.parametrize(
+        "character",
+        ["\u2028", "\u2029"],
+        ids=["U+2028", "U+2029"],
+    )
+    def test_statement_after_semicolon_and_line_separator_is_preserved(
+        self, tmp_path, character
+    ):
+        _make_rpg_project(tmp_path)
+        plugins_path = _make_plugins_js(tmp_path)
+        suffix = f"; // end{character}injected();\n"
+        plugins_path.write_text("var $plugins = []" + suffix, encoding="utf-8")
+
+        from install_plugin import update_plugins_js
+
+        update_plugins_js(str(tmp_path / "www"))
+        content = plugins_path.read_text(encoding="utf-8")
+        assert content.endswith(suffix)
+        entries, end = json.JSONDecoder().raw_decode(
+            content, len("var $plugins = ")
+        )
+        assert [entry["name"] for entry in entries] == ["DynamicTranslation"]
+        assert content[end:] == suffix
+
     def test_bom_and_crlf_are_preserved(self, tmp_path):
         _make_rpg_project(tmp_path)
         plugins_path = _make_plugins_js(tmp_path)

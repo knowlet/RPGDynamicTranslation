@@ -16,6 +16,30 @@ PLUGIN_CONFIG = {
     },
 }
 
+# ECMA-262 LineTerminator is LF, CR, U+2028 LINE SEPARATOR, and U+2029
+# PARAGRAPH SEPARATOR. JSON leaves the last two unescaped, but in JavaScript
+# source they end // comments and physical lines, and they are illegal inside
+# string literals before ES2019.
+_JS_NOT_LINE_TERMINATOR = "[^\n\r\u2028\u2029]"
+_JS_LINE_TERMINATOR = "(?:\r\n|[\n\r\u2028\u2029])"
+_JS_TRIVIA = (
+    "(?:"
+    r"\s+"
+    "|//" + _JS_NOT_LINE_TERMINATOR + "*(?:" + _JS_LINE_TERMINATOR + "|$)"
+    r"|/\*.*?\*/"
+    ")*"
+)
+
+
+def _embed_json_in_javascript(value):
+    """Serialize value as JSON that can be embedded in JavaScript source.
+
+    json.dumps does not escape U+2028 or U+2029. Escape both wherever a
+    JavaScript string literal is emitted so they cannot act as line terminators.
+    """
+    text = json.dumps(value, ensure_ascii=False)
+    return text.replace("\u2028", "\\u2028").replace("\u2029", "\\u2029")
+
 
 def get_paths():
     # Use pathlib.Path for better unicode path handling
@@ -95,9 +119,9 @@ def update_plugins_js(target_dir):
 
     # RPG Maker emits a JSON array after an assignment and optional comments.
     # Parse that array, not brackets or name-like text in comments/parameters.
-    trivia_pattern = r'(?:\s+|//[^\r\n]*(?:\r\n?|\n|$)|/\*.*?\*/)*'
+    # // comments end at every JavaScript line terminator, including U+2028/U+2029.
     prefix_match = re.match(
-        r'\A\ufeff?' + trivia_pattern +
+        r'\A\ufeff?' + _JS_TRIVIA +
         r'(?:(?:var|let|const)\s+\$plugins\s*=\s*)?',
         content,
         re.DOTALL,
@@ -110,7 +134,7 @@ def update_plugins_js(target_dir):
         if not all(isinstance(plugin, dict) for plugin in plugins):
             raise ValueError("plugin entries must be objects")
         suffix = content[array_end:]
-        trivia_end = re.match(trivia_pattern, suffix, re.DOTALL).end()
+        trivia_end = re.match(_JS_TRIVIA, suffix, re.DOTALL).end()
         if suffix[trivia_end:] and suffix[trivia_end] != ";":
             raise ValueError("expected the JSON array to end the assignment")
     except (ValueError, RecursionError) as error:
@@ -121,7 +145,7 @@ def update_plugins_js(target_dir):
         print("DynamicTranslation is already in plugins.js. Skipping update.")
         return
 
-    plugin_string = json.dumps(PLUGIN_CONFIG, ensure_ascii=False)
+    plugin_string = _embed_json_in_javascript(PLUGIN_CONFIG)
 
     before_bracket = content[:array_end - 1].rstrip()
     after_bracket = content[array_end - 1:]
