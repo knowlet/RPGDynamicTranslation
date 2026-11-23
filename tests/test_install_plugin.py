@@ -192,33 +192,46 @@ class TestUpdatePluginsJs:
 
     def test_adds_plugin_to_empty_list(self, tmp_path):
         _make_rpg_project(tmp_path)
-        _make_plugins_js(tmp_path, [])
+        plugins_path = _make_plugins_js(tmp_path, [])
+        plugins_path.write_text(
+            "var $plugins = " + plugins_path.read_text(encoding="utf-8") + ";\n",
+            encoding="utf-8",
+        )
         with patch("sys.argv", ["install_plugin.py", str(tmp_path)]):
             from install_plugin import update_plugins_js
 
             update_plugins_js(str(tmp_path / "www"))
-        plugins_path = tmp_path / "www" / "js" / "plugins.js"
         content = plugins_path.read_text(encoding="utf-8")
+        assert content.startswith("var $plugins = ")
         assert "DynamicTranslation" in content
         assert '"name":"DynamicTranslation"' in content.replace(" ", "")
 
     def test_adds_plugin_to_existing_list(self, tmp_path):
         _make_rpg_project(tmp_path)
-        _make_plugins_js(tmp_path, [{"name": "SomeOtherPlugin", "status": True}])
+        plugins_path = _make_plugins_js(
+            tmp_path, [{"name": "SomeOtherPlugin", "status": True}]
+        )
+        plugins_path.write_text(
+            "var $plugins = " + plugins_path.read_text(encoding="utf-8") + ";\n",
+            encoding="utf-8",
+        )
         from install_plugin import update_plugins_js
 
         update_plugins_js(str(tmp_path / "www"))
-        plugins_path = tmp_path / "www" / "js" / "plugins.js"
         content = plugins_path.read_text(encoding="utf-8")
+        assert content.startswith("var $plugins = ")
         assert "DynamicTranslation" in content
         assert "SomeOtherPlugin" in content
 
     def test_skips_when_plugin_already_registered(self, tmp_path, capsys):
         _make_rpg_project(tmp_path)
-        # Keep support for the compact format emitted by RPG Maker.
+        # Compact assignment emitted by RPG Maker. A bare array is not registration.
         (tmp_path / "www" / "js").mkdir(parents=True, exist_ok=True)
         plugins_path = tmp_path / "www" / "js" / "plugins.js"
-        plugins_path.write_text('[{"name":"DynamicTranslation","status":true}]', encoding="utf-8")
+        plugins_path.write_text(
+            'var $plugins = [{"name":"DynamicTranslation","status":true}];',
+            encoding="utf-8",
+        )
         original_content = plugins_path.read_text()
 
         from install_plugin import update_plugins_js
@@ -330,11 +343,17 @@ class TestUpdatePluginsJs:
         _make_rpg_project(tmp_path)
         other = {"name": "OtherPlugin", "parameters": {"name": "DynamicTranslation"}}
         plugins_path = _make_plugins_js(tmp_path, [other])
+        prefix = "var $plugins = "
+        plugins_path.write_text(
+            prefix + plugins_path.read_text(encoding="utf-8") + ";\n",
+            encoding="utf-8",
+        )
 
         from install_plugin import update_plugins_js
 
         update_plugins_js(str(tmp_path / "www"))
-        entries = json.loads(plugins_path.read_text(encoding="utf-8"))
+        content = plugins_path.read_text(encoding="utf-8")
+        entries, _ = json.JSONDecoder().raw_decode(content, len(prefix))
         assert entries[0] == other
         assert [entry["name"] for entry in entries] == ["OtherPlugin", "DynamicTranslation"]
 
@@ -390,6 +409,24 @@ class TestUpdatePluginsJs:
         assert "Registration failed" in result.stderr
         assert "Installation complete" not in result.stdout
         assert plugins_path.read_text(encoding="utf-8") == content
+
+    def test_cli_rejects_bare_array_without_claiming_completion(self, tmp_path):
+        _make_rpg_project(tmp_path)
+        plugins_path = _make_plugins_js(tmp_path)
+        plugins_path.write_text("[];", encoding="utf-8")
+
+        result = subprocess.run(
+            [sys.executable, str(PROJECT_ROOT / "install_plugin.py"), str(tmp_path)],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+        )
+
+        assert result.returncode != 0
+        assert "Registration failed" in result.stderr
+        assert "Installation complete" not in result.stdout
+        assert "a bare array is not read by RPG Maker" in result.stdout
+        assert plugins_path.read_text(encoding="utf-8") == "[];"
 
     @pytest.mark.parametrize(
         "character,escape",
@@ -540,17 +577,28 @@ class TestUpdatePluginsJs:
         entries, _ = json.JSONDecoder().raw_decode(content, start)
         assert [entry["name"] for entry in entries] == ["Other", "DynamicTranslation"]
 
-    @pytest.mark.parametrize("content", ["[];\n", "[] ; // trailing comment\n", "[]"])
-    def test_bare_array_alone_is_still_accepted(self, tmp_path, content):
+    @pytest.mark.parametrize("content", [
+        "[];",
+        "[];\n",
+        "[]",
+        "[] ; // trailing comment\n",
+        "\ufeff[];\n",
+        "// generated\n[];\n",
+    ])
+    def test_bare_array_is_rejected(self, tmp_path, capsys, content):
+        # RPG Maker reads $plugins. A discarded array never registers the plugin.
         _make_rpg_project(tmp_path)
         plugins_path = _make_plugins_js(tmp_path)
         plugins_path.write_text(content, encoding="utf-8")
 
         from install_plugin import update_plugins_js
 
-        assert update_plugins_js(str(tmp_path / "www")) is not False
-        entries, _ = json.JSONDecoder().raw_decode(plugins_path.read_text(encoding="utf-8"))
-        assert [entry["name"] for entry in entries] == ["DynamicTranslation"]
+        assert update_plugins_js(str(tmp_path / "www")) is False
+        assert plugins_path.read_text(encoding="utf-8") == content
+        error = capsys.readouterr().out
+        assert "Error:" in error
+        assert "expected a $plugins = [...] assignment" in error
+        assert "a bare array is not read by RPG Maker" in error
 
     def test_cr_only_file_keeps_cr_line_endings(self, tmp_path):
         _make_rpg_project(tmp_path)

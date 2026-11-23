@@ -12,9 +12,12 @@ the actual plugin array is empty. Nested parameter objects can likewise match
 the whole-file registration regex.
 
 Use the existing Python standard library rather than add a JavaScript parser.
-Recognize only an optional leading BOM/comments, followed by a bare JSON array
-or `var`/`let`/`const $plugins =` and a JSON array. Decode that array and use the
-returned end offset for insertion. Check names only on top-level plugin entries.
+Recognize only an optional leading BOM/comments, followed by
+`var`/`let`/`const $plugins =` and a JSON array. A bare array, including a file
+that contains only `[];`, is rejected unchanged: RPG Maker reads the `$plugins`
+assignment, and a discarded array expression never delivers the registration.
+Decode that array and use the returned end offset for insertion. Check names
+only on top-level plugin entries.
 Require the array to end the assignment (only comments/whitespace before a
 semicolon or EOF), so array-starting expressions such as `[].concat(...)`
 cannot be mistaken for a supported JSON value.

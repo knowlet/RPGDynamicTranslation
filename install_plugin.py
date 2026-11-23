@@ -129,18 +129,25 @@ def update_plugins_js(target_dir):
     with open(plugins_js_path, "r", encoding="utf-8", newline="") as f:
         content = f.read()
 
-    # RPG Maker emits a JSON array after an assignment and optional comments.
+    # RPG Maker reads the global created by `var $plugins = [...]`.
+    # A bare array is an expression statement, so the engine never sees it.
     # Parse that array, not brackets or name-like text in comments/parameters.
     # // comments end at every JavaScript line terminator, including U+2028/U+2029.
-    prefix_match = re.match(
-        r'\A\ufeff?' + _JS_TRIVIA +
-        r'((?:var|let|const)' + _JS_SPACE + r'+\$plugins' + _JS_SPACE + r'*=' + _JS_SPACE + r'*)?',
-        content,
-        re.DOTALL,
-    )
-    array_start = prefix_match.end()
-    assigned = prefix_match.group(1) is not None
     try:
+        prefix_match = re.match(
+            r'\A\ufeff?' + _JS_TRIVIA +
+            r'(?:var|let|const)' + _JS_SPACE + r'+\$plugins' + _JS_SPACE + r'*=' + _JS_SPACE + r'*',
+            content,
+            re.DOTALL,
+        )
+        if prefix_match is None:
+            if re.match(r'\A\ufeff?' + _JS_TRIVIA + r'\[', content, re.DOTALL):
+                raise ValueError(
+                    "expected a $plugins = [...] assignment; "
+                    "a bare array is not read by RPG Maker"
+                )
+            raise ValueError("expected a $plugins = [...] assignment")
+        array_start = prefix_match.end()
         if content[array_start:array_start + 1] != "[":
             raise ValueError("expected a JSON plugin array")
         plugins, array_end = json.JSONDecoder(
@@ -148,18 +155,11 @@ def update_plugins_js(target_dir):
         ).raw_decode(content, array_start)
         if not all(isinstance(plugin, dict) for plugin in plugins):
             raise ValueError("plugin entries must be objects")
-        # After an explicit "$plugins =" assignment the array must end that
-        # statement. A bare array must be the only statement: otherwise a
-        # discarded leading array (e.g. "[]; var $plugins = [];") would be
-        # taken for the plugin list while the real assignment stays empty.
+        # The array must end the assignment. Later statements are preserved.
         suffix = content[array_end:]
         rest = suffix[re.match(_JS_TRIVIA, suffix, re.DOTALL).end():]
         if rest and not rest.startswith(";"):
             raise ValueError("expected the JSON array to end the assignment")
-        if not assigned and rest:
-            rest = rest[1:]
-            if rest[re.match(_JS_TRIVIA, rest, re.DOTALL).end():]:
-                raise ValueError("expected the bare JSON plugin array to be the only statement")
     except (ValueError, RecursionError) as error:
         print(f"Error: Could not parse plugins.js ({error}). File left unchanged.")
         return False
