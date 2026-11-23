@@ -358,6 +358,9 @@ class TestUpdatePluginsJs:
         'var $plugins = [].concat([]);\n',
         'var $plugins = []\n.concat([]);\n',
         'var $plugins = [{"name":"OtherPlugin"}][0];\n',
+        '[]; var $plugins = [];\n',
+        '[];\nvar $plugins = [{"name": "OtherPlugin"}];\n',
+        '[] /* c */ ; $plugins = [];',
     ])
     def test_unsupported_or_malformed_list_is_unchanged(self, tmp_path, capsys, content):
         _make_rpg_project(tmp_path)
@@ -536,6 +539,31 @@ class TestUpdatePluginsJs:
         start = content.index("[")
         entries, _ = json.JSONDecoder().raw_decode(content, start)
         assert [entry["name"] for entry in entries] == ["Other", "DynamicTranslation"]
+
+    @pytest.mark.parametrize("content", ["[];\n", "[] ; // trailing comment\n", "[]"])
+    def test_bare_array_alone_is_still_accepted(self, tmp_path, content):
+        _make_rpg_project(tmp_path)
+        plugins_path = _make_plugins_js(tmp_path)
+        plugins_path.write_text(content, encoding="utf-8")
+
+        from install_plugin import update_plugins_js
+
+        assert update_plugins_js(str(tmp_path / "www")) is not False
+        entries, _ = json.JSONDecoder().raw_decode(plugins_path.read_text(encoding="utf-8"))
+        assert [entry["name"] for entry in entries] == ["DynamicTranslation"]
+
+    def test_cr_only_file_keeps_cr_line_endings(self, tmp_path):
+        _make_rpg_project(tmp_path)
+        plugins_path = _make_plugins_js(tmp_path)
+        original = 'var $plugins =\r[\r{"name":"Other","status":true}\r];\r'
+        plugins_path.write_bytes(original.encode("utf-8"))
+
+        from install_plugin import update_plugins_js
+
+        update_plugins_js(str(tmp_path / "www"))
+        content = plugins_path.read_bytes()
+        assert b"\n" not in content
+        assert content.startswith(b'var $plugins =\r[\r{"name":"Other","status":true},\r')
 
     @pytest.mark.parametrize("constant", ["NaN", "Infinity", "-Infinity"])
     def test_non_json_constants_are_rejected_unchanged(

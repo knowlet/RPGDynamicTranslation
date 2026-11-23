@@ -134,11 +134,12 @@ def update_plugins_js(target_dir):
     # // comments end at every JavaScript line terminator, including U+2028/U+2029.
     prefix_match = re.match(
         r'\A\ufeff?' + _JS_TRIVIA +
-        r'(?:(?:var|let|const)' + _JS_SPACE + r'+\$plugins' + _JS_SPACE + r'*=' + _JS_SPACE + r'*)?',
+        r'((?:var|let|const)' + _JS_SPACE + r'+\$plugins' + _JS_SPACE + r'*=' + _JS_SPACE + r'*)?',
         content,
         re.DOTALL,
     )
     array_start = prefix_match.end()
+    assigned = prefix_match.group(1) is not None
     try:
         if content[array_start:array_start + 1] != "[":
             raise ValueError("expected a JSON plugin array")
@@ -147,10 +148,18 @@ def update_plugins_js(target_dir):
         ).raw_decode(content, array_start)
         if not all(isinstance(plugin, dict) for plugin in plugins):
             raise ValueError("plugin entries must be objects")
+        # After an explicit "$plugins =" assignment the array must end that
+        # statement. A bare array must be the only statement: otherwise a
+        # discarded leading array (e.g. "[]; var $plugins = [];") would be
+        # taken for the plugin list while the real assignment stays empty.
         suffix = content[array_end:]
-        trivia_end = re.match(_JS_TRIVIA, suffix, re.DOTALL).end()
-        if suffix[trivia_end:] and suffix[trivia_end] != ";":
+        rest = suffix[re.match(_JS_TRIVIA, suffix, re.DOTALL).end():]
+        if rest and not rest.startswith(";"):
             raise ValueError("expected the JSON array to end the assignment")
+        if not assigned and rest:
+            rest = rest[1:]
+            if rest[re.match(_JS_TRIVIA, rest, re.DOTALL).end():]:
+                raise ValueError("expected the bare JSON plugin array to be the only statement")
     except (ValueError, RecursionError) as error:
         print(f"Error: Could not parse plugins.js ({error}). File left unchanged.")
         return False
@@ -163,7 +172,7 @@ def update_plugins_js(target_dir):
 
     # Keep the file's own line ending and the whitespace that preceded the
     # closing bracket, so a CRLF file stays byte-for-byte CRLF.
-    newline = "\r\n" if "\r\n" in content else "\n"
+    newline = "\r\n" if "\r\n" in content else "\r" if "\r" in content else "\n"
     inner = content[:array_end - 1]
     before_bracket = inner.rstrip(" \t\r\n")
     closing_space = inner[len(before_bracket):] or newline
