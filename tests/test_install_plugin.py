@@ -1,10 +1,8 @@
 """Pytest tests for install_plugin.py"""
 
 import json
-import signal
 import subprocess
 import sys
-import time
 from pathlib import Path
 from unittest.mock import patch
 
@@ -602,30 +600,32 @@ class TestUpdatePluginsJs:
         assert "expected a $plugins = [...] assignment" in error
         assert "a bare array is not read by RPG Maker" in error
 
-    def test_long_whitespace_before_bare_array_is_rejected(self, tmp_path, capsys):
+    def test_long_whitespace_before_bare_array_is_rejected(self, tmp_path):
         # A repeated whitespace pattern used to partition this run exponentially.
+        # The check runs in a child process so a hang is bounded without SIGALRM,
+        # which Windows does not provide.
         _make_rpg_project(tmp_path)
         plugins_path = _make_plugins_js(tmp_path)
         content = (" " * 4000) + "[];"
         plugins_path.write_text(content, encoding="utf-8")
+        child_code = (
+            "import sys\n"
+            f"sys.path.insert(0, {str(PROJECT_ROOT)!r})\n"
+            "from install_plugin import update_plugins_js\n"
+            "sys.exit(0 if update_plugins_js(sys.argv[1]) is False else 1)\n"
+        )
 
-        from install_plugin import update_plugins_js
+        child = subprocess.run(
+            [sys.executable, "-c", child_code, str(tmp_path / "www")],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=2,
+        )
 
-        def _alarm(signum, frame):
-            raise TimeoutError("leading trivia scan backtracked")
-
-        previous = signal.signal(signal.SIGALRM, _alarm)
-        signal.alarm(2)
-        started = time.perf_counter()
-        try:
-            result = update_plugins_js(str(tmp_path / "www"))
-        finally:
-            signal.alarm(0)
-            signal.signal(signal.SIGALRM, previous)
-        assert time.perf_counter() - started < 1
-        assert result is False
+        assert child.returncode == 0, child.stderr
+        assert "a bare array is not read by RPG Maker" in child.stdout
         assert plugins_path.read_text(encoding="utf-8") == content
-        assert "a bare array is not read by RPG Maker" in capsys.readouterr().out
 
     @pytest.mark.parametrize("content", [
         (
