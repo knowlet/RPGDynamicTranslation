@@ -17,7 +17,9 @@ Recognize only an optional leading BOM/comments, followed by
 that contains only `[];`, is rejected unchanged: RPG Maker reads the `$plugins`
 assignment, and a discarded array expression never delivers the registration.
 Decode that array and use the returned end offset for insertion. Check names
-only on top-level plugin entries.
+only on top-level plugin entries. Leading trivia is scanned forward only: a
+block comment ends at its first `*/` and is not extended over a later
+statement, and a long run of whitespace cannot make the scan backtrack.
 Require the array to end the assignment (only comments/whitespace before a
 semicolon or EOF), so array-starting expressions such as `[].concat(...)`
 cannot be mistaken for a supported JSON value.

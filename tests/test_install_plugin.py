@@ -1,8 +1,10 @@
 """Pytest tests for install_plugin.py"""
 
 import json
+import signal
 import subprocess
 import sys
+import time
 from pathlib import Path
 from unittest.mock import patch
 
@@ -599,6 +601,89 @@ class TestUpdatePluginsJs:
         assert "Error:" in error
         assert "expected a $plugins = [...] assignment" in error
         assert "a bare array is not read by RPG Maker" in error
+
+    def test_long_whitespace_before_bare_array_is_rejected(self, tmp_path, capsys):
+        # A repeated whitespace pattern used to partition this run exponentially.
+        _make_rpg_project(tmp_path)
+        plugins_path = _make_plugins_js(tmp_path)
+        content = (" " * 4000) + "[];"
+        plugins_path.write_text(content, encoding="utf-8")
+
+        from install_plugin import update_plugins_js
+
+        def _alarm(signum, frame):
+            raise TimeoutError("leading trivia scan backtracked")
+
+        previous = signal.signal(signal.SIGALRM, _alarm)
+        signal.alarm(2)
+        started = time.perf_counter()
+        try:
+            result = update_plugins_js(str(tmp_path / "www"))
+        finally:
+            signal.alarm(0)
+            signal.signal(signal.SIGALRM, previous)
+        assert time.perf_counter() - started < 1
+        assert result is False
+        assert plugins_path.read_text(encoding="utf-8") == content
+        assert "a bare array is not read by RPG Maker" in capsys.readouterr().out
+
+    @pytest.mark.parametrize("content", [
+        (
+            "/* closed */\n"
+            "setup();\n"
+            "var $plugins = [];\n"
+            "function local() {\n"
+            "  /* later */\n"
+            "  var $plugins = [];\n"
+            "}\n"
+        ),
+        (
+            "/* intro\n"
+            "var $plugins = [];\n"
+            "*/\n"
+            "function local() {\n"
+            "  /* marker */\n"
+            "  var $plugins = [];\n"
+            "}\n"
+        ),
+    ])
+    def test_block_comment_stops_at_first_closer(self, tmp_path, capsys, content):
+        # Extending the comment past the first */ rewrites the function-local
+        # $plugins array and reports success. RPG Maker never reads that local.
+        _make_rpg_project(tmp_path)
+        plugins_path = _make_plugins_js(tmp_path)
+        plugins_path.write_text(content, encoding="utf-8")
+
+        from install_plugin import update_plugins_js
+
+        assert update_plugins_js(str(tmp_path / "www")) is False
+        assert plugins_path.read_text(encoding="utf-8") == content
+        assert "DynamicTranslation" not in plugins_path.read_text(encoding="utf-8")
+        assert "Error:" in capsys.readouterr().out
+
+    def test_closed_block_comment_still_updates_global_assignment(self, tmp_path):
+        _make_rpg_project(tmp_path)
+        plugins_path = _make_plugins_js(tmp_path)
+        tail = (
+            "function local() {\n"
+            "  /* later */\n"
+            "  var $plugins = [];\n"
+            "}\n"
+        )
+        plugins_path.write_text(
+            "/* closed */\nvar $plugins = [];\n" + tail,
+            encoding="utf-8",
+        )
+
+        from install_plugin import update_plugins_js
+
+        assert update_plugins_js(str(tmp_path / "www")) is not False
+        content = plugins_path.read_text(encoding="utf-8")
+        assert content.endswith(tail)
+        assert content.count("DynamicTranslation") == 1
+        entries, end = json.JSONDecoder().raw_decode(content, content.index("["))
+        assert [entry["name"] for entry in entries] == ["DynamicTranslation"]
+        assert content[end:] == ";\n" + tail
 
     def test_cr_only_file_keeps_cr_line_endings(self, tmp_path):
         _make_rpg_project(tmp_path)

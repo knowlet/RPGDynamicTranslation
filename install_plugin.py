@@ -2,7 +2,6 @@ import sys
 import os
 import shutil
 import json
-import re
 from pathlib import Path
 
 PLUGIN_CONFIG = {
@@ -20,22 +19,68 @@ PLUGIN_CONFIG = {
 # PARAGRAPH SEPARATOR. JSON leaves the last two unescaped, but in JavaScript
 # source they end // comments and physical lines, and they are illegal inside
 # string literals before ES2019.
-_JS_NOT_LINE_TERMINATOR = "[^\n\r\u2028\u2029]"
-_JS_LINE_TERMINATOR = "(?:\r\n|[\n\r\u2028\u2029])"
+_JS_LINE_TERMINATORS = frozenset("\n\r\u2028\u2029")
 # ECMA-262 WhiteSpace (TAB, VT, FF, ZWNBSP and every Zs space) plus
 # LineTerminator. Python's \s is wider: it also accepts U+001C-U+001F and
 # U+0085, which JavaScript rejects between tokens.
-_JS_SPACE = (
-    "[\t\v\f \u00a0\ufeff\u1680\u2000-\u200a\u202f\u205f\u3000"
-    "\n\r\u2028\u2029]"
+_JS_SPACE_CHARS = _JS_LINE_TERMINATORS | frozenset(
+    "\t\v\f \u00a0\ufeff\u1680\u202f\u205f\u3000"
+    + "".join(chr(code) for code in range(0x2000, 0x200B))
 )
-_JS_TRIVIA = (
-    "(?:"
-    + _JS_SPACE + "+"
-    "|//" + _JS_NOT_LINE_TERMINATOR + "*(?:" + _JS_LINE_TERMINATOR + "|$)"
-    r"|/\*.*?\*/"
-    ")*"
-)
+
+
+def _skip_js_trivia(content, index):
+    """Skip whitespace and comments in one forward pass.
+
+    A block comment ends at its first ``*/``. Searching again after that
+    closer would hide later statements, including a real ``$plugins``
+    assignment, and a repeated whitespace pattern backtracks exponentially.
+    """
+    length = len(content)
+    while index < length:
+        if content[index] in _JS_SPACE_CHARS:
+            index += 1
+            continue
+        if content.startswith("//", index):
+            index += 2
+            while index < length and content[index] not in _JS_LINE_TERMINATORS:
+                index += 1
+            if index < length:
+                index += 2 if content.startswith("\r\n", index) else 1
+            continue
+        if content.startswith("/*", index):
+            close = content.find("*/", index + 2)
+            if close < 0:
+                break
+            index = close + 2
+            continue
+        break
+    return index
+
+
+def _skip_js_spaces(content, index):
+    length = len(content)
+    while index < length and content[index] in _JS_SPACE_CHARS:
+        index += 1
+    return index
+
+
+def _match_plugins_assignment(content, index):
+    """Return the index after ``var``/``let``/``const $plugins =``, or None."""
+    for keyword in ("var", "let", "const"):
+        if not content.startswith(keyword, index):
+            continue
+        after_keyword = index + len(keyword)
+        if after_keyword >= len(content) or content[after_keyword] not in _JS_SPACE_CHARS:
+            return None
+        name = _skip_js_spaces(content, after_keyword)
+        if not content.startswith("$plugins", name):
+            return None
+        equals = _skip_js_spaces(content, name + len("$plugins"))
+        if equals < len(content) and content[equals] == "=":
+            return _skip_js_spaces(content, equals + 1)
+        return None
+    return None
 
 
 def _reject_non_json_constant(name):
@@ -133,21 +178,18 @@ def update_plugins_js(target_dir):
     # A bare array is an expression statement, so the engine never sees it.
     # Parse that array, not brackets or name-like text in comments/parameters.
     # // comments end at every JavaScript line terminator, including U+2028/U+2029.
+    # Block comments end at the first */. A later function-local $plugins is not
+    # the list RPG Maker reads.
     try:
-        prefix_match = re.match(
-            r'\A\ufeff?' + _JS_TRIVIA +
-            r'(?:var|let|const)' + _JS_SPACE + r'+\$plugins' + _JS_SPACE + r'*=' + _JS_SPACE + r'*',
-            content,
-            re.DOTALL,
-        )
-        if prefix_match is None:
-            if re.match(r'\A\ufeff?' + _JS_TRIVIA + r'\[', content, re.DOTALL):
+        start = _skip_js_trivia(content, 0)
+        array_start = _match_plugins_assignment(content, start)
+        if array_start is None:
+            if start < len(content) and content[start] == "[":
                 raise ValueError(
                     "expected a $plugins = [...] assignment; "
                     "a bare array is not read by RPG Maker"
                 )
             raise ValueError("expected a $plugins = [...] assignment")
-        array_start = prefix_match.end()
         if content[array_start:array_start + 1] != "[":
             raise ValueError("expected a JSON plugin array")
         plugins, array_end = json.JSONDecoder(
@@ -156,8 +198,7 @@ def update_plugins_js(target_dir):
         if not all(isinstance(plugin, dict) for plugin in plugins):
             raise ValueError("plugin entries must be objects")
         # The array must end the assignment. Later statements are preserved.
-        suffix = content[array_end:]
-        rest = suffix[re.match(_JS_TRIVIA, suffix, re.DOTALL).end():]
+        rest = content[_skip_js_trivia(content, array_end):]
         if rest and not rest.startswith(";"):
             raise ValueError("expected the JSON array to end the assignment")
     except (ValueError, RecursionError) as error:
