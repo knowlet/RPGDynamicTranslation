@@ -328,7 +328,8 @@
         }
 
         // 直接查找翻譯
-        var translatedText = currentTranslations[originalText];
+        var translatedText = Object.prototype.hasOwnProperty.call(currentTranslations, originalText)
+            ? currentTranslations[originalText] : undefined;
         if (translatedText !== undefined) {
             // 調試：記錄成功翻譯的文字
             if (Math.random() < 0.01) { // 只記錄 1% 的翻譯以避免刷屏
@@ -340,7 +341,8 @@
         // 如果找不到完整翻譯，嘗試清理可能的格式差異後再查找
         var cleanedText = originalText.trim();
         if (cleanedText !== originalText) {
-            translatedText = currentTranslations[cleanedText];
+            translatedText = Object.prototype.hasOwnProperty.call(currentTranslations, cleanedText)
+                ? currentTranslations[cleanedText] : undefined;
             if (translatedText !== undefined) {
                 return translatedText;
             }
@@ -350,7 +352,7 @@
         if (this._enableSubstringExtraction && originalText.indexOf('\n') === -1) {
             // 查找包含此文字的完整訊息翻譯
             for (var key in currentTranslations) {
-                if (currentTranslations.hasOwnProperty(key)) {
+                if (Object.prototype.hasOwnProperty.call(currentTranslations, key)) {
                     // 如果原文是某個完整訊息的子字串，嘗試提取對應的翻譯部分
                     var keyIndex = key.indexOf(originalText);
                     if (keyIndex !== -1 && key !== originalText) { // 排除已經檢查過的直接匹配
