@@ -22,13 +22,25 @@ PLUGIN_CONFIG = {
 # string literals before ES2019.
 _JS_NOT_LINE_TERMINATOR = "[^\n\r\u2028\u2029]"
 _JS_LINE_TERMINATOR = "(?:\r\n|[\n\r\u2028\u2029])"
+# ECMA-262 WhiteSpace (TAB, VT, FF, ZWNBSP and every Zs space) plus
+# LineTerminator. Python's \s is wider: it also accepts U+001C-U+001F and
+# U+0085, which JavaScript rejects between tokens.
+_JS_SPACE = (
+    "[\t\v\f \u00a0\ufeff\u1680\u2000-\u200a\u202f\u205f\u3000"
+    "\n\r\u2028\u2029]"
+)
 _JS_TRIVIA = (
     "(?:"
-    r"\s+"
+    + _JS_SPACE + "+"
     "|//" + _JS_NOT_LINE_TERMINATOR + "*(?:" + _JS_LINE_TERMINATOR + "|$)"
     r"|/\*.*?\*/"
     ")*"
 )
+
+
+def _reject_non_json_constant(name):
+    """Refuse NaN/Infinity, which Python's decoder accepts but JSON forbids."""
+    raise ValueError(f"{name} is not a JSON value")
 
 
 def _embed_json_in_javascript(value):
@@ -122,7 +134,7 @@ def update_plugins_js(target_dir):
     # // comments end at every JavaScript line terminator, including U+2028/U+2029.
     prefix_match = re.match(
         r'\A\ufeff?' + _JS_TRIVIA +
-        r'(?:(?:var|let|const)\s+\$plugins\s*=\s*)?',
+        r'(?:(?:var|let|const)' + _JS_SPACE + r'+\$plugins' + _JS_SPACE + r'*=' + _JS_SPACE + r'*)?',
         content,
         re.DOTALL,
     )
@@ -130,7 +142,9 @@ def update_plugins_js(target_dir):
     try:
         if content[array_start:array_start + 1] != "[":
             raise ValueError("expected a JSON plugin array")
-        plugins, array_end = json.JSONDecoder().raw_decode(content, array_start)
+        plugins, array_end = json.JSONDecoder(
+            parse_constant=_reject_non_json_constant
+        ).raw_decode(content, array_start)
         if not all(isinstance(plugin, dict) for plugin in plugins):
             raise ValueError("plugin entries must be objects")
         suffix = content[array_end:]
@@ -147,11 +161,19 @@ def update_plugins_js(target_dir):
 
     plugin_string = _embed_json_in_javascript(PLUGIN_CONFIG)
 
-    before_bracket = content[:array_end - 1].rstrip()
+    # Keep the file's own line ending and the whitespace that preceded the
+    # closing bracket, so a CRLF file stays byte-for-byte CRLF.
+    newline = "\r\n" if "\r\n" in content else "\n"
+    inner = content[:array_end - 1]
+    before_bracket = inner.rstrip(" \t\r\n")
+    closing_space = inner[len(before_bracket):] or newline
     after_bracket = content[array_end - 1:]
-    prefix = ", " if plugins else ""
+    separator = "," if plugins else ""
 
-    new_content = f"{before_bracket}\n{prefix}{plugin_string}\n{after_bracket}"
+    new_content = (
+        f"{before_bracket}{separator}{newline}{plugin_string}"
+        f"{closing_space}{after_bracket}"
+    )
 
     with open(plugins_js_path, "w", encoding="utf-8", newline="") as f:
         f.write(new_content)

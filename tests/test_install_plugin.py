@@ -516,6 +516,75 @@ class TestUpdatePluginsJs:
         assert len(entries) == 1
         assert content[end:] == suffix
 
+    def test_crlf_inside_nonempty_array_is_preserved(self, tmp_path):
+        _make_rpg_project(tmp_path)
+        plugins_path = _make_plugins_js(tmp_path)
+        original = (
+            'var $plugins =\r\n[\r\n{"name":"Other","status":true}\r\n];\r\n'
+        )
+        plugins_path.write_bytes(original.encode("utf-8"))
+
+        from install_plugin import update_plugins_js
+
+        update_plugins_js(str(tmp_path / "www"))
+        content = plugins_path.read_bytes().decode("utf-8")
+        assert content.startswith(
+            'var $plugins =\r\n[\r\n{"name":"Other","status":true},\r\n'
+        )
+        assert content.endswith("}\r\n];\r\n")
+        assert "\n" not in content.replace("\r\n", "")
+        start = content.index("[")
+        entries, _ = json.JSONDecoder().raw_decode(content, start)
+        assert [entry["name"] for entry in entries] == ["Other", "DynamicTranslation"]
+
+    @pytest.mark.parametrize("constant", ["NaN", "Infinity", "-Infinity"])
+    def test_non_json_constants_are_rejected_unchanged(
+        self, tmp_path, capsys, constant
+    ):
+        _make_rpg_project(tmp_path)
+        plugins_path = _make_plugins_js(tmp_path)
+        original = (
+            'var $plugins = [{"name":"Other","parameters":{"limit":'
+            + constant
+            + "}}];\n"
+        )
+        plugins_path.write_bytes(original.encode("utf-8"))
+
+        from install_plugin import update_plugins_js
+
+        assert update_plugins_js(str(tmp_path / "www")) is False
+        assert plugins_path.read_bytes() == original.encode("utf-8")
+        assert "Error:" in capsys.readouterr().out
+
+    @pytest.mark.parametrize("character", ["\u0085", "\u001c", "\u001f"])
+    def test_non_javascript_whitespace_between_tokens_is_rejected(
+        self, tmp_path, capsys, character
+    ):
+        _make_rpg_project(tmp_path)
+        plugins_path = _make_plugins_js(tmp_path)
+        original = "var" + character + "$plugins = [];\n"
+        plugins_path.write_bytes(original.encode("utf-8"))
+
+        from install_plugin import update_plugins_js
+
+        assert update_plugins_js(str(tmp_path / "www")) is False
+        assert plugins_path.read_bytes() == original.encode("utf-8")
+        assert "Error:" in capsys.readouterr().out
+
+    @pytest.mark.parametrize("character", ["\u00a0", "\ufeff", "\u3000", "\u2028"])
+    def test_javascript_whitespace_between_tokens_is_accepted(
+        self, tmp_path, character
+    ):
+        _make_rpg_project(tmp_path)
+        plugins_path = _make_plugins_js(tmp_path)
+        plugins_path.write_bytes(("var" + character + "$plugins = [];\n").encode("utf-8"))
+
+        from install_plugin import update_plugins_js
+
+        update_plugins_js(str(tmp_path / "www"))
+        content = plugins_path.read_bytes().decode("utf-8")
+        assert '"DynamicTranslation"' in content
+
 
 class TestInstallTranslation:
     """Tests for install_translation()."""
