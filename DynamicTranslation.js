@@ -94,6 +94,7 @@
     // TranslationManager 類別 - 支援 mtool 工具的 key-value 格式
     var TranslationManager = function () {
         this._currentLanguage = defaultLanguage;
+        this._languageRequest = null;
         this._translations = {}; // key-value 格式的翻譯字典
         this._originalTexts = {}; // 記錄原文的映射
         this._isInitialized = false;
@@ -205,11 +206,14 @@
 
     // 設定當前語言
     TranslationManager.prototype.setLanguage = function (language) {
+        // Every selection supersedes pending loads, including reselecting the active language.
+        var request = {};
+        this._languageRequest = request;
         if (this._currentLanguage === language) return;
 
         if (!this._translations[language]) {
             this.loadLanguage(language, function (success) {
-                if (success) {
+                if (success && this._languageRequest === request) {
                     this._currentLanguage = language;
                     this._applyTranslations();
                     this._refreshAllWindows();
