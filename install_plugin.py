@@ -15,6 +15,88 @@ PLUGIN_CONFIG = {
     },
 }
 
+# ECMA-262 LineTerminator is LF, CR, U+2028 LINE SEPARATOR, and U+2029
+# PARAGRAPH SEPARATOR. JSON leaves the last two unescaped, but in JavaScript
+# source they end // comments and physical lines, and they are illegal inside
+# string literals before ES2019.
+_JS_LINE_TERMINATORS = frozenset("\n\r\u2028\u2029")
+# ECMA-262 WhiteSpace (TAB, VT, FF, ZWNBSP and every Zs space) plus
+# LineTerminator. Python's \s is wider: it also accepts U+001C-U+001F and
+# U+0085, which JavaScript rejects between tokens.
+_JS_SPACE_CHARS = _JS_LINE_TERMINATORS | frozenset(
+    "\t\v\f \u00a0\ufeff\u1680\u202f\u205f\u3000"
+    + "".join(chr(code) for code in range(0x2000, 0x200B))
+)
+
+
+def _skip_js_trivia(content, index):
+    """Skip whitespace and comments in one forward pass.
+
+    A block comment ends at its first ``*/``. Searching again after that
+    closer would hide later statements, including a real ``$plugins``
+    assignment, and a repeated whitespace pattern backtracks exponentially.
+    """
+    length = len(content)
+    while index < length:
+        if content[index] in _JS_SPACE_CHARS:
+            index += 1
+            continue
+        if content.startswith("//", index):
+            index += 2
+            while index < length and content[index] not in _JS_LINE_TERMINATORS:
+                index += 1
+            if index < length:
+                index += 2 if content.startswith("\r\n", index) else 1
+            continue
+        if content.startswith("/*", index):
+            close = content.find("*/", index + 2)
+            if close < 0:
+                break
+            index = close + 2
+            continue
+        break
+    return index
+
+
+def _skip_js_spaces(content, index):
+    length = len(content)
+    while index < length and content[index] in _JS_SPACE_CHARS:
+        index += 1
+    return index
+
+
+def _match_plugins_assignment(content, index):
+    """Return the index after ``var``/``let``/``const $plugins =``, or None."""
+    for keyword in ("var", "let", "const"):
+        if not content.startswith(keyword, index):
+            continue
+        after_keyword = index + len(keyword)
+        if after_keyword >= len(content) or content[after_keyword] not in _JS_SPACE_CHARS:
+            return None
+        name = _skip_js_spaces(content, after_keyword)
+        if not content.startswith("$plugins", name):
+            return None
+        equals = _skip_js_spaces(content, name + len("$plugins"))
+        if equals < len(content) and content[equals] == "=":
+            return _skip_js_spaces(content, equals + 1)
+        return None
+    return None
+
+
+def _reject_non_json_constant(name):
+    """Refuse NaN/Infinity, which Python's decoder accepts but JSON forbids."""
+    raise ValueError(f"{name} is not a JSON value")
+
+
+def _embed_json_in_javascript(value):
+    """Serialize value as JSON that can be embedded in JavaScript source.
+
+    json.dumps does not escape U+2028 or U+2029. Escape both wherever a
+    JavaScript string literal is emitted so they cannot act as line terminators.
+    """
+    text = json.dumps(value, ensure_ascii=False)
+    return text.replace("\u2028", "\\u2028").replace("\u2029", "\\u2029")
+
 
 def get_paths():
     # Use pathlib.Path for better unicode path handling
@@ -89,31 +171,61 @@ def update_plugins_js(target_dir):
         return
 
     print("Updating plugins.js...")
-    with open(plugins_js_path, "r", encoding="utf-8") as f:
+    with open(plugins_js_path, "r", encoding="utf-8", newline="") as f:
         content = f.read()
 
-    if '"name":"DynamicTranslation"' in content:
+    # RPG Maker reads the global created by `var $plugins = [...]`.
+    # A bare array is an expression statement, so the engine never sees it.
+    # Parse that array, not brackets or name-like text in comments/parameters.
+    # // comments end at every JavaScript line terminator, including U+2028/U+2029.
+    # Block comments end at the first */. A later function-local $plugins is not
+    # the list RPG Maker reads.
+    try:
+        start = _skip_js_trivia(content, 0)
+        array_start = _match_plugins_assignment(content, start)
+        if array_start is None:
+            if start < len(content) and content[start] == "[":
+                raise ValueError(
+                    "expected a $plugins = [...] assignment; "
+                    "a bare array is not read by RPG Maker"
+                )
+            raise ValueError("expected a $plugins = [...] assignment")
+        if content[array_start:array_start + 1] != "[":
+            raise ValueError("expected a JSON plugin array")
+        plugins, array_end = json.JSONDecoder(
+            parse_constant=_reject_non_json_constant
+        ).raw_decode(content, array_start)
+        if not all(isinstance(plugin, dict) for plugin in plugins):
+            raise ValueError("plugin entries must be objects")
+        # The array must end the assignment. Later statements are preserved.
+        rest = content[_skip_js_trivia(content, array_end):]
+        if rest and not rest.startswith(";"):
+            raise ValueError("expected the JSON array to end the assignment")
+    except (ValueError, RecursionError) as error:
+        print(f"Error: Could not parse plugins.js ({error}). File left unchanged.")
+        return False
+
+    if any(plugin.get("name") == "DynamicTranslation" for plugin in plugins):
         print("DynamicTranslation is already in plugins.js. Skipping update.")
         return
 
-    plugin_string = json.dumps(PLUGIN_CONFIG, ensure_ascii=False)
+    plugin_string = _embed_json_in_javascript(PLUGIN_CONFIG)
 
-    # Find the last closing bracket
-    last_bracket_index = content.rfind("]")
-    if last_bracket_index == -1:
-        print("Error: Could not parse plugins.js (could not find closing bracket).")
-        return
+    # Keep the file's own line ending and the whitespace that preceded the
+    # closing bracket, so a CRLF file stays byte-for-byte CRLF.
+    newline = "\r\n" if "\r\n" in content else "\r" if "\r" in content else "\n"
+    inner = content[:array_end - 1]
+    before_bracket = inner.rstrip(" \t\r\n")
+    closing_space = inner[len(before_bracket):] or newline
+    after_bracket = content[array_end - 1:]
+    separator = "," if plugins else ""
 
-    before_bracket = content[:last_bracket_index].rstrip()
-    after_bracket = content[last_bracket_index:]
+    new_content = (
+        f"{before_bracket}{separator}{newline}{plugin_string}"
+        f"{closing_space}{after_bracket}"
+    )
 
-    # Check if we need a comma: if before_bracket not empty and last char != '['
-    needs_comma = bool(before_bracket) and before_bracket[-1] != "["
-    prefix = ", " if needs_comma else ""
-
-    new_content = f"{before_bracket}\n{prefix}{plugin_string}\n{after_bracket}"
-
-    with open(plugins_js_path, "w", encoding="utf-8") as f:
+    with open(plugins_js_path, "w", encoding="utf-8", newline="") as f:
         f.write(new_content)
     print("plugins.js updated successfully.")
 
@@ -165,7 +277,11 @@ def main():
     print(f"Target directory: {target_dir}")
 
     copy_plugin_file(script_dir, www_dir)
-    update_plugins_js(www_dir)
+    if update_plugins_js(www_dir) is False:
+        raise SystemExit(
+            "Registration failed; plugins.js was not changed. "
+            "Use RPG Maker's Plugin Manager for manual registration."
+        )
     install_translation(target_dir, www_dir)
 
     print("Installation complete!")

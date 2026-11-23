@@ -192,33 +192,46 @@ class TestUpdatePluginsJs:
 
     def test_adds_plugin_to_empty_list(self, tmp_path):
         _make_rpg_project(tmp_path)
-        _make_plugins_js(tmp_path, [])
+        plugins_path = _make_plugins_js(tmp_path, [])
+        plugins_path.write_text(
+            "var $plugins = " + plugins_path.read_text(encoding="utf-8") + ";\n",
+            encoding="utf-8",
+        )
         with patch("sys.argv", ["install_plugin.py", str(tmp_path)]):
             from install_plugin import update_plugins_js
 
             update_plugins_js(str(tmp_path / "www"))
-        plugins_path = tmp_path / "www" / "js" / "plugins.js"
         content = plugins_path.read_text(encoding="utf-8")
+        assert content.startswith("var $plugins = ")
         assert "DynamicTranslation" in content
         assert '"name":"DynamicTranslation"' in content.replace(" ", "")
 
     def test_adds_plugin_to_existing_list(self, tmp_path):
         _make_rpg_project(tmp_path)
-        _make_plugins_js(tmp_path, [{"name": "SomeOtherPlugin", "status": True}])
+        plugins_path = _make_plugins_js(
+            tmp_path, [{"name": "SomeOtherPlugin", "status": True}]
+        )
+        plugins_path.write_text(
+            "var $plugins = " + plugins_path.read_text(encoding="utf-8") + ";\n",
+            encoding="utf-8",
+        )
         from install_plugin import update_plugins_js
 
         update_plugins_js(str(tmp_path / "www"))
-        plugins_path = tmp_path / "www" / "js" / "plugins.js"
         content = plugins_path.read_text(encoding="utf-8")
+        assert content.startswith("var $plugins = ")
         assert "DynamicTranslation" in content
         assert "SomeOtherPlugin" in content
 
     def test_skips_when_plugin_already_registered(self, tmp_path, capsys):
         _make_rpg_project(tmp_path)
-        # Use compact format - install_plugin checks for '"name":"DynamicTranslation"'
+        # Compact assignment emitted by RPG Maker. A bare array is not registration.
         (tmp_path / "www" / "js").mkdir(parents=True, exist_ok=True)
         plugins_path = tmp_path / "www" / "js" / "plugins.js"
-        plugins_path.write_text('[{"name":"DynamicTranslation","status":true}]', encoding="utf-8")
+        plugins_path.write_text(
+            'var $plugins = [{"name":"DynamicTranslation","status":true}];',
+            encoding="utf-8",
+        )
         original_content = plugins_path.read_text()
 
         from install_plugin import update_plugins_js
@@ -228,6 +241,51 @@ class TestUpdatePluginsJs:
         assert new_content == original_content
         out = capsys.readouterr().out.lower()
         assert "skipping" in out
+
+    @pytest.mark.parametrize("indent", [None, 2])
+    def test_skips_existing_registration_with_json_whitespace(self, tmp_path, indent):
+        _make_rpg_project(tmp_path)
+        plugins_path = tmp_path / "www" / "js" / "plugins.js"
+        existing = [{
+            "name": "DynamicTranslation",
+            "status": False,
+            "parameters": {"Default Language": "ja"},
+        }]
+        content = "var $plugins = " + json.dumps(existing, indent=indent) + ";\n"
+        plugins_path.write_text(content, encoding="utf-8")
+
+        from install_plugin import update_plugins_js
+
+        update_plugins_js(str(tmp_path / "www"))
+
+        # Existing status, user parameters and formatting must stay untouched.
+        assert plugins_path.read_text(encoding="utf-8") == content
+
+    @pytest.mark.parametrize("with_other_plugin", [False, True])
+    def test_repeated_registration_is_idempotent(self, tmp_path, with_other_plugin):
+        _make_rpg_project(tmp_path)
+        existing = (
+            [{"name": "OtherPlugin", "status": True}] if with_other_plugin else []
+        )
+        plugins_path = _make_plugins_js(tmp_path, existing)
+        plugins_path.write_text(
+            "var $plugins = " + plugins_path.read_text(encoding="utf-8") + ";\n",
+            encoding="utf-8",
+        )
+
+        from install_plugin import update_plugins_js
+
+        update_plugins_js(str(tmp_path / "www"))
+        first_install = plugins_path.read_text(encoding="utf-8")
+        update_plugins_js(str(tmp_path / "www"))
+        second_install = plugins_path.read_text(encoding="utf-8")
+
+        assert second_install == first_install
+        entries = json.loads(
+            second_install.removeprefix("var $plugins = ").rstrip(";\n")
+        )
+        assert sum(entry["name"] == "DynamicTranslation" for entry in entries) == 1
+        assert len(entries) == len(existing) + 1
 
     def test_handles_missing_plugins_js(self, tmp_path, capsys):
         _make_rpg_project(tmp_path)
@@ -240,6 +298,453 @@ class TestUpdatePluginsJs:
         update_plugins_js(str(tmp_path / "www"))
         out = capsys.readouterr().out
         assert "Warning" in out
+
+    @pytest.mark.parametrize("suffix", [
+        ";\n// documentation [optional]\n",
+        ";\n/* preserve [this] comment */\n",
+        ';\nconst audit = ["preserved"];\n',
+        ' /* preserve comment before semicolon */;\n',
+    ])
+    def test_inserts_into_plugin_array_not_trailing_brackets(self, tmp_path, suffix):
+        _make_rpg_project(tmp_path)
+        plugins_path = _make_plugins_js(tmp_path)
+        prefix = "// Generated by RPG Maker.\nvar $plugins =\n"
+        plugins_path.write_text(prefix + "[]" + suffix, encoding="utf-8")
+
+        from install_plugin import PLUGIN_CONFIG, update_plugins_js
+
+        update_plugins_js(str(tmp_path / "www"))
+        content = plugins_path.read_text(encoding="utf-8")
+        entries, end = json.JSONDecoder().raw_decode(content, len(prefix))
+        assert entries == [PLUGIN_CONFIG]
+        assert content[end:] == suffix
+        update_plugins_js(str(tmp_path / "www"))
+        assert plugins_path.read_text(encoding="utf-8") == content
+
+    @pytest.mark.parametrize("comment", [
+        '// removed {"name": "DynamicTranslation"}\n',
+        '/* removed {"name": "DynamicTranslation"} */\n',
+    ])
+    def test_name_in_leading_comment_is_not_registration(self, tmp_path, comment):
+        _make_rpg_project(tmp_path)
+        plugins_path = _make_plugins_js(tmp_path)
+        prefix = comment + "var $plugins = "
+        plugins_path.write_text(prefix + "[];\n", encoding="utf-8")
+
+        from install_plugin import update_plugins_js
+
+        update_plugins_js(str(tmp_path / "www"))
+        content = plugins_path.read_text(encoding="utf-8")
+        assert content.startswith(prefix)
+        entries, _ = json.JSONDecoder().raw_decode(content, len(prefix))
+        assert [entry["name"] for entry in entries] == ["DynamicTranslation"]
+
+    def test_nested_name_is_not_registration(self, tmp_path):
+        _make_rpg_project(tmp_path)
+        other = {"name": "OtherPlugin", "parameters": {"name": "DynamicTranslation"}}
+        plugins_path = _make_plugins_js(tmp_path, [other])
+        prefix = "var $plugins = "
+        plugins_path.write_text(
+            prefix + plugins_path.read_text(encoding="utf-8") + ";\n",
+            encoding="utf-8",
+        )
+
+        from install_plugin import update_plugins_js
+
+        update_plugins_js(str(tmp_path / "www"))
+        content = plugins_path.read_text(encoding="utf-8")
+        entries, _ = json.JSONDecoder().raw_decode(content, len(prefix))
+        assert entries[0] == other
+        assert [entry["name"] for entry in entries] == ["OtherPlugin", "DynamicTranslation"]
+
+    def test_escaped_existing_name_preserves_registration(self, tmp_path):
+        _make_rpg_project(tmp_path)
+        plugins_path = _make_plugins_js(tmp_path)
+        content = r'var $plugins = [{"name":"Dynamic\u0054ranslation","status":false}];'
+        plugins_path.write_text(content, encoding="utf-8")
+
+        from install_plugin import update_plugins_js
+
+        update_plugins_js(str(tmp_path / "www"))
+        assert plugins_path.read_text(encoding="utf-8") == content
+
+    @pytest.mark.parametrize("content", [
+        'var $plugins = [{"name": "OtherPlugin"}; // ]\n',
+        'var $plugins = [null];\n',
+        'var $plugins = [{"name": "OtherPlugin"},];\n',
+        'var unrelated = [];\n',
+        'var $plugins = loadPlugins(); // []\n',
+        'var $plugins = [].concat([]);\n',
+        'var $plugins = []\n.concat([]);\n',
+        'var $plugins = [{"name":"OtherPlugin"}][0];\n',
+        '[]; var $plugins = [];\n',
+        '[];\nvar $plugins = [{"name": "OtherPlugin"}];\n',
+        '[] /* c */ ; $plugins = [];',
+    ])
+    def test_unsupported_or_malformed_list_is_unchanged(self, tmp_path, capsys, content):
+        _make_rpg_project(tmp_path)
+        plugins_path = _make_plugins_js(tmp_path)
+        plugins_path.write_text(content, encoding="utf-8")
+
+        from install_plugin import update_plugins_js
+
+        assert update_plugins_js(str(tmp_path / "www")) is False
+        assert plugins_path.read_text(encoding="utf-8") == content
+        assert "Error:" in capsys.readouterr().out
+
+    def test_cli_reports_registration_failure_without_claiming_completion(self, tmp_path):
+        _make_rpg_project(tmp_path)
+        plugins_path = _make_plugins_js(tmp_path)
+        content = 'var $plugins = loadPlugins(); // []\n'
+        plugins_path.write_text(content, encoding="utf-8")
+
+        result = subprocess.run(
+            [sys.executable, str(PROJECT_ROOT / "install_plugin.py"), str(tmp_path)],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+        )
+
+        assert result.returncode != 0
+        assert "Registration failed" in result.stderr
+        assert "Installation complete" not in result.stdout
+        assert plugins_path.read_text(encoding="utf-8") == content
+
+    def test_cli_rejects_bare_array_without_claiming_completion(self, tmp_path):
+        _make_rpg_project(tmp_path)
+        plugins_path = _make_plugins_js(tmp_path)
+        plugins_path.write_text("[];", encoding="utf-8")
+
+        result = subprocess.run(
+            [sys.executable, str(PROJECT_ROOT / "install_plugin.py"), str(tmp_path)],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+        )
+
+        assert result.returncode != 0
+        assert "Registration failed" in result.stderr
+        assert "Installation complete" not in result.stdout
+        assert "a bare array is not read by RPG Maker" in result.stdout
+        assert plugins_path.read_text(encoding="utf-8") == "[];"
+
+    @pytest.mark.parametrize(
+        "character,escape",
+        [("\u2028", r"\u2028"), ("\u2029", r"\u2029")],
+        ids=["U+2028", "U+2029"],
+    )
+    def test_emitted_registration_escapes_js_line_terminator(
+        self, tmp_path, monkeypatch, character, escape
+    ):
+        import install_plugin
+
+        config = json.loads(json.dumps(install_plugin.PLUGIN_CONFIG))
+        config["description"] = f"before{character}after"
+        config["parameters"] = {
+            **config["parameters"],
+            "Note": f"key{character}value",
+        }
+        monkeypatch.setattr(install_plugin, "PLUGIN_CONFIG", config)
+
+        _make_rpg_project(tmp_path)
+        plugins_path = _make_plugins_js(tmp_path)
+        plugins_path.write_text("var $plugins = [];\n", encoding="utf-8")
+
+        assert install_plugin.update_plugins_js(str(tmp_path / "www")) is None
+        content = plugins_path.read_text(encoding="utf-8")
+        assert install_plugin.update_plugins_js(str(tmp_path / "www")) is None
+
+        assert plugins_path.read_text(encoding="utf-8") == content
+        assert character not in content
+        assert escape in content
+        entries = json.loads(content.removeprefix("var $plugins = ").rstrip(";\n"))
+        assert entries == [config]
+
+    def test_embed_json_escapes_both_line_separators_in_strings(self):
+        from install_plugin import _embed_json_in_javascript
+
+        value = {
+            "line\u2028": "paragraph\u2029",
+            "nested": ["both\u2028\u2029"],
+        }
+        literal = _embed_json_in_javascript(value)
+
+        assert "\u2028" not in literal
+        assert "\u2029" not in literal
+        assert r"\u2028" in literal
+        assert r"\u2029" in literal
+        assert json.loads(literal) == value
+
+    @pytest.mark.parametrize(
+        "character",
+        ["\u2028", "\u2029"],
+        ids=["U+2028", "U+2029"],
+    )
+    def test_line_comment_ends_at_unicode_line_terminator(self, tmp_path, character):
+        _make_rpg_project(tmp_path)
+        plugins_path = _make_plugins_js(tmp_path)
+        prefix = f"// hidden{character}var $plugins = "
+        plugins_path.write_text(prefix + "[]", encoding="utf-8")
+
+        from install_plugin import update_plugins_js
+
+        update_plugins_js(str(tmp_path / "www"))
+        content = plugins_path.read_text(encoding="utf-8")
+        assert content.startswith(prefix)
+        assert character not in content[len(prefix):]
+        entries, _ = json.JSONDecoder().raw_decode(content, len(prefix))
+        assert [entry["name"] for entry in entries] == ["DynamicTranslation"]
+
+    @pytest.mark.parametrize(
+        "character",
+        ["\u2028", "\u2029"],
+        ids=["U+2028", "U+2029"],
+    )
+    def test_code_after_unicode_line_terminator_is_not_comment_trivia(
+        self, tmp_path, capsys, character
+    ):
+        # No semicolon: in JavaScript the comment ends at the line separator,
+        # so injected() is a real statement and the assignment must be rejected.
+        _make_rpg_project(tmp_path)
+        plugins_path = _make_plugins_js(tmp_path)
+        content = f"var $plugins = [] // end{character}injected();\n"
+        plugins_path.write_text(content, encoding="utf-8")
+
+        from install_plugin import update_plugins_js
+
+        assert update_plugins_js(str(tmp_path / "www")) is False
+        assert plugins_path.read_text(encoding="utf-8") == content
+        assert "Error:" in capsys.readouterr().out
+
+    @pytest.mark.parametrize(
+        "character",
+        ["\u2028", "\u2029"],
+        ids=["U+2028", "U+2029"],
+    )
+    def test_statement_after_semicolon_and_line_separator_is_preserved(
+        self, tmp_path, character
+    ):
+        _make_rpg_project(tmp_path)
+        plugins_path = _make_plugins_js(tmp_path)
+        suffix = f"; // end{character}injected();\n"
+        plugins_path.write_text("var $plugins = []" + suffix, encoding="utf-8")
+
+        from install_plugin import update_plugins_js
+
+        update_plugins_js(str(tmp_path / "www"))
+        content = plugins_path.read_text(encoding="utf-8")
+        assert content.endswith(suffix)
+        entries, end = json.JSONDecoder().raw_decode(
+            content, len("var $plugins = ")
+        )
+        assert [entry["name"] for entry in entries] == ["DynamicTranslation"]
+        assert content[end:] == suffix
+
+    def test_bom_and_crlf_are_preserved(self, tmp_path):
+        _make_rpg_project(tmp_path)
+        plugins_path = _make_plugins_js(tmp_path)
+        prefix = "\ufeff// generated\r\nvar $plugins = "
+        suffix = ";\r\n// [optional]\r\n"
+        plugins_path.write_bytes((prefix + "[]" + suffix).encode("utf-8"))
+
+        from install_plugin import update_plugins_js
+
+        update_plugins_js(str(tmp_path / "www"))
+        content = plugins_path.read_bytes().decode("utf-8")
+        assert content.startswith(prefix)
+        entries, end = json.JSONDecoder().raw_decode(content, len(prefix))
+        assert len(entries) == 1
+        assert content[end:] == suffix
+
+    def test_crlf_inside_nonempty_array_is_preserved(self, tmp_path):
+        _make_rpg_project(tmp_path)
+        plugins_path = _make_plugins_js(tmp_path)
+        original = (
+            'var $plugins =\r\n[\r\n{"name":"Other","status":true}\r\n];\r\n'
+        )
+        plugins_path.write_bytes(original.encode("utf-8"))
+
+        from install_plugin import update_plugins_js
+
+        update_plugins_js(str(tmp_path / "www"))
+        content = plugins_path.read_bytes().decode("utf-8")
+        assert content.startswith(
+            'var $plugins =\r\n[\r\n{"name":"Other","status":true},\r\n'
+        )
+        assert content.endswith("}\r\n];\r\n")
+        assert "\n" not in content.replace("\r\n", "")
+        start = content.index("[")
+        entries, _ = json.JSONDecoder().raw_decode(content, start)
+        assert [entry["name"] for entry in entries] == ["Other", "DynamicTranslation"]
+
+    @pytest.mark.parametrize("content", [
+        "[];",
+        "[];\n",
+        "[]",
+        "[] ; // trailing comment\n",
+        "\ufeff[];\n",
+        "// generated\n[];\n",
+    ])
+    def test_bare_array_is_rejected(self, tmp_path, capsys, content):
+        # RPG Maker reads $plugins. A discarded array never registers the plugin.
+        _make_rpg_project(tmp_path)
+        plugins_path = _make_plugins_js(tmp_path)
+        plugins_path.write_text(content, encoding="utf-8")
+
+        from install_plugin import update_plugins_js
+
+        assert update_plugins_js(str(tmp_path / "www")) is False
+        assert plugins_path.read_text(encoding="utf-8") == content
+        error = capsys.readouterr().out
+        assert "Error:" in error
+        assert "expected a $plugins = [...] assignment" in error
+        assert "a bare array is not read by RPG Maker" in error
+
+    def test_long_whitespace_before_bare_array_is_rejected(self, tmp_path):
+        # A repeated whitespace pattern used to partition this run exponentially.
+        # The check runs in a child process so a hang is bounded without SIGALRM,
+        # which Windows does not provide.
+        _make_rpg_project(tmp_path)
+        plugins_path = _make_plugins_js(tmp_path)
+        content = (" " * 4000) + "[];"
+        plugins_path.write_text(content, encoding="utf-8")
+        child_code = (
+            "import sys\n"
+            f"sys.path.insert(0, {str(PROJECT_ROOT)!r})\n"
+            "from install_plugin import update_plugins_js\n"
+            "sys.exit(0 if update_plugins_js(sys.argv[1]) is False else 1)\n"
+        )
+
+        child = subprocess.run(
+            [sys.executable, "-c", child_code, str(tmp_path / "www")],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=2,
+        )
+
+        assert child.returncode == 0, child.stderr
+        assert "a bare array is not read by RPG Maker" in child.stdout
+        assert plugins_path.read_text(encoding="utf-8") == content
+
+    @pytest.mark.parametrize("content", [
+        (
+            "/* closed */\n"
+            "setup();\n"
+            "var $plugins = [];\n"
+            "function local() {\n"
+            "  /* later */\n"
+            "  var $plugins = [];\n"
+            "}\n"
+        ),
+        (
+            "/* intro\n"
+            "var $plugins = [];\n"
+            "*/\n"
+            "function local() {\n"
+            "  /* marker */\n"
+            "  var $plugins = [];\n"
+            "}\n"
+        ),
+    ])
+    def test_block_comment_stops_at_first_closer(self, tmp_path, capsys, content):
+        # Extending the comment past the first */ rewrites the function-local
+        # $plugins array and reports success. RPG Maker never reads that local.
+        _make_rpg_project(tmp_path)
+        plugins_path = _make_plugins_js(tmp_path)
+        plugins_path.write_text(content, encoding="utf-8")
+
+        from install_plugin import update_plugins_js
+
+        assert update_plugins_js(str(tmp_path / "www")) is False
+        assert plugins_path.read_text(encoding="utf-8") == content
+        assert "DynamicTranslation" not in plugins_path.read_text(encoding="utf-8")
+        assert "Error:" in capsys.readouterr().out
+
+    def test_closed_block_comment_still_updates_global_assignment(self, tmp_path):
+        _make_rpg_project(tmp_path)
+        plugins_path = _make_plugins_js(tmp_path)
+        tail = (
+            "function local() {\n"
+            "  /* later */\n"
+            "  var $plugins = [];\n"
+            "}\n"
+        )
+        plugins_path.write_text(
+            "/* closed */\nvar $plugins = [];\n" + tail,
+            encoding="utf-8",
+        )
+
+        from install_plugin import update_plugins_js
+
+        assert update_plugins_js(str(tmp_path / "www")) is not False
+        content = plugins_path.read_text(encoding="utf-8")
+        assert content.endswith(tail)
+        assert content.count("DynamicTranslation") == 1
+        entries, end = json.JSONDecoder().raw_decode(content, content.index("["))
+        assert [entry["name"] for entry in entries] == ["DynamicTranslation"]
+        assert content[end:] == ";\n" + tail
+
+    def test_cr_only_file_keeps_cr_line_endings(self, tmp_path):
+        _make_rpg_project(tmp_path)
+        plugins_path = _make_plugins_js(tmp_path)
+        original = 'var $plugins =\r[\r{"name":"Other","status":true}\r];\r'
+        plugins_path.write_bytes(original.encode("utf-8"))
+
+        from install_plugin import update_plugins_js
+
+        update_plugins_js(str(tmp_path / "www"))
+        content = plugins_path.read_bytes()
+        assert b"\n" not in content
+        assert content.startswith(b'var $plugins =\r[\r{"name":"Other","status":true},\r')
+
+    @pytest.mark.parametrize("constant", ["NaN", "Infinity", "-Infinity"])
+    def test_non_json_constants_are_rejected_unchanged(
+        self, tmp_path, capsys, constant
+    ):
+        _make_rpg_project(tmp_path)
+        plugins_path = _make_plugins_js(tmp_path)
+        original = (
+            'var $plugins = [{"name":"Other","parameters":{"limit":'
+            + constant
+            + "}}];\n"
+        )
+        plugins_path.write_bytes(original.encode("utf-8"))
+
+        from install_plugin import update_plugins_js
+
+        assert update_plugins_js(str(tmp_path / "www")) is False
+        assert plugins_path.read_bytes() == original.encode("utf-8")
+        assert "Error:" in capsys.readouterr().out
+
+    @pytest.mark.parametrize("character", ["\u0085", "\u001c", "\u001f"])
+    def test_non_javascript_whitespace_between_tokens_is_rejected(
+        self, tmp_path, capsys, character
+    ):
+        _make_rpg_project(tmp_path)
+        plugins_path = _make_plugins_js(tmp_path)
+        original = "var" + character + "$plugins = [];\n"
+        plugins_path.write_bytes(original.encode("utf-8"))
+
+        from install_plugin import update_plugins_js
+
+        assert update_plugins_js(str(tmp_path / "www")) is False
+        assert plugins_path.read_bytes() == original.encode("utf-8")
+        assert "Error:" in capsys.readouterr().out
+
+    @pytest.mark.parametrize("character", ["\u00a0", "\ufeff", "\u3000", "\u2028"])
+    def test_javascript_whitespace_between_tokens_is_accepted(
+        self, tmp_path, character
+    ):
+        _make_rpg_project(tmp_path)
+        plugins_path = _make_plugins_js(tmp_path)
+        plugins_path.write_bytes(("var" + character + "$plugins = [];\n").encode("utf-8"))
+
+        from install_plugin import update_plugins_js
+
+        update_plugins_js(str(tmp_path / "www"))
+        content = plugins_path.read_bytes().decode("utf-8")
+        assert '"DynamicTranslation"' in content
 
 
 class TestInstallTranslation:
